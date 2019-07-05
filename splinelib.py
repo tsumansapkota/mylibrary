@@ -1,9 +1,10 @@
 import numpy as np
-
+# import nnlib as tnn
 
 class Spline1D(object):
 
     def __init__(self, max_points, x, y, epsilon=0.1, ): #x,y for initialization
+        assert max_points >= 2
         self.n_points = max_points # changes dynamically
         self.n_max = max_points # max point is constant
         self.eps = epsilon
@@ -52,7 +53,15 @@ class Spline1D(object):
         rangeX = np.zeros((self.n_points-1, self.input.shape[0]))
 
         for i in range(self.n_points-1):
-            rangeX[i] = self._inrange_(self.input, self.X[i], self.X[i+1])
+
+            if self.n_points-2 == 0:
+                rangeX[i] = self._inrange_(self.input, -np.inf, np.inf)
+            elif i==0:
+                rangeX[i] = self._inrange_(self.input, -np.inf, self.X[i+1])
+            elif i== self.n_points-2:
+                rangeX[i] = self._inrange_(self.input, self.X[i], np.inf)
+            else:
+                rangeX[i] = self._inrange_(self.input, self.X[i], self.X[i+1])
         self.rangeX = rangeX
 
         rnx_ = np.count_nonzero(rangeX, axis=1)
@@ -64,16 +73,24 @@ class Spline1D(object):
         self.rangeX_n = rangeX_n
 
     def preprocess(self,):
+        self.diffX = np.diff(self.X)
+        self.diffY = np.diff(self.Y)
+
+        # when diff between two X values is zero .: causes divided by zero error
+        if (self.diffX == 0).any():
+        # if len(self.diffX.nonzero()[0]) < len(self.diffX): 
+            self._remove_close_points_()
+            # self._sort_parameters_()
+
 
         self._sort_parameters_()
         self._calculate_rangeX_()
 
-        self.diffX = np.diff(self.X)
-        self.diffY = np.diff(self.Y)
-
 
     def forward(self,input):
         self.input = input
+
+
         self.preprocess()
 
         output = np.zeros_like(self.input)
@@ -101,10 +118,12 @@ class Spline1D(object):
                 b = (-1* consts[i] +1)*self.rangeX[i]
                 dY[i] = a+b
         dY = dY*self.del_output
-        dY_= dY.sum(axis=1)/self.rangeX_n
-        dY = dY.mean(axis=1)
-        # dY = dY.sum(axis=1)/self.rangeX_n
-        dY[0], dY[-1] = dY_[0], dY_[-1]
+        ## can choose any two options for gradient of Y
+        dY = dY.sum(axis=1)/self.rangeX_n
+        
+        # dY_= dY.sum(axis=1)/self.rangeX_n
+        # dY = dY.mean(axis=1)
+        # dY[0], dY[-1] = dY_[0], dY_[-1]
 
         self.del_Y = dY
         return self.del_Y
@@ -127,6 +146,8 @@ class Spline1D(object):
         ##########This is true delX#############
         #Not Implemented
         ########################################
+
+        ## can choose any of below options for calculating gradient of X
         dX = dX.mean(axis=1)
         # dX = dX.sum(axis=1)/self.rangeX_n
 
@@ -157,8 +178,27 @@ class Spline1D(object):
         self.Y = self.Y - self.del_Y*learning_rate
         self._sort_parameters_()
 
-        self.X[0] = self.input.min()-self.eps
-        self.X[-1] = self.input.max()+self.eps
+        min = self.input.min()
+        max = self.input.max()
+        # if np.abs(self.X[0] - min) > self.eps:
+        if self.X[0] > min:
+            # print('changing minimum start point')
+            self.preprocess()
+            X_ = min-self.eps
+            Y_ = self.diffY[0]/self.diffX[0] *(X_ - self.X[0]) + self.Y[0]
+            self.X[0] = X_
+            self.Y[0] = Y_
+        # if np.abs(self.X[-1] - max) > self.eps:
+        if self.X[-1] < max:
+            # print('changing maximum end point')
+            self.preprocess()
+            X_ = max+self.eps
+            Y_ = self.diffY[-1]/self.diffX[-1] *(X_ - self.X[-2]) + self.Y[-2]
+            self.X[-1] = X_
+            self.Y[-1] = Y_
+
+        # self.X[0] = self.input.min()-self.eps
+        # self.X[-1] = self.input.max()+self.eps
 
 
 
@@ -217,3 +257,103 @@ class Spline1D(object):
         self.X = self.X[nx0mask]
         self.Y = self.Y[nx0mask]
         self.n_points = len(self.X)
+
+    def _increase_pieces_(self, increase_by=1):
+        self.n_max += increase_by
+
+
+
+
+class SplineVectorLayer(object):
+
+    def __init__(self, input_dim, max_points, epsilon=0.1):
+        self.dimension = input_dim
+        self.spline_list = [Spline1D(max_points, x=np.array([-1,1]), y=np.array([-1,1])) for _ in range(input_dim)]
+        self.input = None
+        self.output = None
+        self.del_output = None
+
+    def forward(self, input):
+        self.input = input
+        self.output = np.empty_like(input)
+        for i in range(self.dimension):
+            inpi = input[:, i]
+            outi = self.spline_list[i].forward(inpi)
+            self.output[:, i] = outi
+        return self.output
+
+    def backward(self, del_output):
+        self.del_output = del_output
+        del_input = np.empty_like(del_output)
+        for i in range(self.dimension):
+            del_outi = del_output[:, i]
+            del_inpi = self.spline_list[i].backward(del_outi)
+            del_input[:, i] = del_inpi
+        return del_input
+
+    def update(self, learning_rate=0.1):
+        for spline in self.spline_list:
+            spline.update(learning_rate)
+
+    def _increase_pieces_(self, increase_by=1):
+        for spline in self.spline_list:
+            spline._increase_pieces_(increase_by)
+
+    def _maintain_good_spline_(self):
+        for spline in self.spline_list:
+            spline._remove_close_points_()
+            spline._combine_linear_points_()
+            spline._remove_no_input_points_()
+            spline._add_new_point_()
+
+
+class SplineMatrixLayer(object):
+
+    def __init__(self, input_dim, output_dim, max_points, epsilon=0.1):
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.spline_mat = np.empty((input_dim, output_dim), dtype=np.object)
+
+        self.input = None
+        self.output = None
+        self.del_output = None
+
+    def forward(self, input):
+        self.input = input
+        m = self.input.shape[0]
+        self.output = np.zeros((m, self.output_dim))
+
+        for i in range(self.input_dim):
+            inpi = self.input[:, i]
+            for j in range(self.output_dim):
+                self.output[:, j] += self.spline_mat[i,j].forward(inpi)
+        return self.output
+
+    def backward(self, del_output):
+        self.del_output = del_output
+        del_input = np.zeros_like(self.input)
+        
+        for i in range(self.output_dim):
+            del_outi = del_output[:, i]
+            for j in range(self.input_dim):
+                del_input[:, j] += self.spline_mat[j,i].backward(del_outi)
+        return del_input
+
+    def update(self, learning_rate=0.1):
+        for i in range(self.input_dim):
+            for j in range(self.output_dim):
+                self.spline_mat[i,j].update(learning_rate)
+
+
+    def _increase_pieces_(self, increase_by=1):
+        for i in range(self.input_dim):
+            for j in range(self.output_dim):
+                self.spline_mat[i,j]._increase_pieces_(increase_by)
+
+    def _maintain_good_spline_(self):
+        for i in range(self.input_dim):
+            for spline in self.spline_mat[i]:
+                spline._remove_close_points_()
+                spline._combine_linear_points_()
+                spline._remove_no_input_points_()
+                spline._add_new_point_()
