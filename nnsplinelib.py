@@ -1,27 +1,30 @@
 import numpy as np
-# import nnlib as tnn
+from nnlib import *
 
 class Spline1D(object):
 
-    def __init__(self, max_points, x, y, epsilon=0.1, ): #x,y for initialization
+    def __init__(self, max_points, optimizer=SGD(), epsilon=0.1): #x,y for initialization
         assert max_points >= 2
         self.n_points = max_points # changes dynamically
         self.n_max = max_points # max point is constant
         self.eps = epsilon
         
-        X_ = np.random.uniform(x.min()+epsilon, x.max()-epsilon, size=(max_points-2))
+        X_ = np.random.uniform(-1+epsilon, 1-epsilon, size=(max_points-2))
         X = np.empty(shape=(self.n_points))
         X[1:-1] = X_
-        X[0], X[-1] = x.min()-epsilon, x.max()+epsilon
+        X[0], X[-1] = -1-epsilon, 1+epsilon
         self.X = X
-
-        self.Y = np.random.uniform(y.min(), y.max(), size=(max_points))
+        self.Y = np.random.uniform(-1, 1, size=(max_points))
+        
+        self.XOpt = optimizer.set_parameter(self.X)
+        self.YOpt = optimizer.set_parameter(self.Y)
+        
         self.rangeX = None
         self.rangeX_n = None
         self.diffX = None
         self.diffY = None
 
-        self.input = x
+        self.input = None
         self.output = None
 
         self.del_output = None
@@ -29,7 +32,7 @@ class Spline1D(object):
         self.del_Y = None
         self.del_input=None
 
-        self.preprocess()
+        self._sort_parameters_()
         pass
 
  ####################################################################################   
@@ -174,8 +177,11 @@ class Spline1D(object):
 ####################################################################################
 
     def update(self, learning_rate=0.1):
-        self.X = self.X - self.del_X*learning_rate
-        self.Y = self.Y - self.del_Y*learning_rate
+        gradients = self.XOpt.compute_gradient(self.del_X)
+        self.X -= gradients
+        gradients = self.YOpt.compute_gradient(self.del_Y)
+        self.Y -= gradients
+
         self._sort_parameters_()
 
         min = self.input.min()
@@ -263,15 +269,19 @@ class Spline1D(object):
 
 
 
+ ##################################################################################   
+ ##################################################################################   
 
-class SplineVectorLayer(object):
+class SplineVectorLayer(Layer):
 
-    def __init__(self, input_dim, max_points, epsilon=0.1):
+    def __init__(self, input_dim, max_points, optimizer=SGD(),epsilon=0.1):
         self.dimension = input_dim
-        self.spline_list = [Spline1D(max_points, x=np.array([-1,1]), y=np.array([-1,1])) for _ in range(input_dim)]
+        self.spline_list = [Spline1D(max_points, optimizer=Optimizer, epsilon=epsilon) for _ in range(input_dim)]
         self.input = None
         self.output = None
         self.del_output = None
+
+        layerList.append(self)
 
     def forward(self, input):
         self.input = input
@@ -306,19 +316,22 @@ class SplineVectorLayer(object):
             spline._remove_no_input_points_()
             spline._add_new_point_()
 
+ ##################################################################################   
+ ##################################################################################   
 
-class SplineMatrixLayer(object):
+class SplineMatrixLayer(Layer):
 
-    def __init__(self, input_dim, output_dim, max_points, epsilon=0.1):
+    def __init__(self, input_dim, output_dim, max_points, optimizer=SGD(), epsilon=0.1):
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.spline_mat = np.empty((input_dim, output_dim), dtype=np.object)
         for i in range(self.input_dim):
             for j in range(self.output_dim):
-                self.spline_mat[i,j] = Spline1D(max_points, x=np.array([-1,1]), y=np.array([-1,1]))
+                self.spline_mat[i,j] = Spline1D(max_points, optimizer=Optimizer, epsilon=epsilon)
         self.input = None
         self.output = None
         self.del_output = None
+        layerList.append(self)
 
     def forward(self, input):
         self.input = input
@@ -359,3 +372,7 @@ class SplineMatrixLayer(object):
                 spline._combine_linear_points_()
                 spline._remove_no_input_points_()
                 spline._add_new_point_()
+
+
+ ##################################################################################   
+ ##################################################################################   
