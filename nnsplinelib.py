@@ -1,5 +1,7 @@
 import numpy as np
-from nnlib import *
+from mylibrary.nnlib import *
+# from nnlib import *
+
 
 class Spline1D(object):
 
@@ -9,11 +11,11 @@ class Spline1D(object):
         self.n_max = max_points # max point is constant
         self.eps = epsilon
         
-        X_ = np.random.uniform(-1+epsilon, 1-epsilon, size=(max_points-2))
-        X = np.empty(shape=(self.n_points))
-        X[1:-1] = X_
-        X[0], X[-1] = -1-epsilon, 1+epsilon
-        self.X = X
+        # X_ = np.random.uniform(-1+epsilon, 1-epsilon, size=(max_points-2))
+        # X = np.empty(shape=(self.n_points))
+        # X[1:-1] = X_
+        # X[0], X[-1] = -1-epsilon, 1+epsilon
+        self.X = np.random.randn(max_points)
         self.Y = np.random.uniform(-1, 1, size=(max_points))
         
         self.XOpt = optimizer.set_parameter(self.X)
@@ -276,7 +278,7 @@ class SplineVectorLayer(Layer):
 
     def __init__(self, input_dim, max_points, optimizer=SGD(),epsilon=0.1):
         self.dimension = input_dim
-        self.spline_list = [Spline1D(max_points, optimizer=Optimizer, epsilon=epsilon) for _ in range(input_dim)]
+        self.spline_list = [Spline1D(max_points, optimizer=optimizer, epsilon=epsilon) for _ in range(input_dim)]
         self.input = None
         self.output = None
         self.del_output = None
@@ -327,7 +329,7 @@ class SplineMatrixLayer(Layer):
         self.spline_mat = np.empty((input_dim, output_dim), dtype=np.object)
         for i in range(self.input_dim):
             for j in range(self.output_dim):
-                self.spline_mat[i,j] = Spline1D(max_points, optimizer=Optimizer, epsilon=epsilon)
+                self.spline_mat[i,j] = Spline1D(max_points, optimizer=optimizer, epsilon=epsilon)
         self.input = None
         self.output = None
         self.del_output = None
