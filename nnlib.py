@@ -143,6 +143,23 @@ class Sigmoid(Layer):
         return (self.out * (1 - self.out)) * output_delta
 
 
+class Gaussian(Layer):
+    def __init__(self):
+        layerList.append(self)
+        self.input = None
+        self.out = None
+        self.del_output = None
+
+    def forward(self, x):
+        self.input = x
+        self.out = np.exp(-x**2)
+        return self.out
+
+    def backward(self, output_delta):
+        self.del_output = output_delta
+        return (-2 * self.input * self.out) * output_delta
+
+
 class Tanh(Layer):
     def __init__(self):
         layerList.append(self)
@@ -256,7 +273,7 @@ class DoubleRelu(Layer):
         # print(toret.shape)
         return toret
 
-
+    
         
 
 ##############################################################
