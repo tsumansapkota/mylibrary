@@ -118,13 +118,18 @@ class Spline1D(object):
                 dY[i] = a+b
         dY = dY*self.del_output
         ## can choose any three options for gradient of Y
-        # dY = dY.sum(axis=1)/self.rangeX_n
-        
         # dY_= dY.sum(axis=1)/self.rangeX_n
         # dY = dY.mean(axis=1)
         # dY[0], dY[-1] = dY_[0], dY_[-1]
 
-        dY = dY.mean(axis=1)
+        # dY_ = dY.mean(axis=1)
+        # dY= dY.sum(axis=1)/self.rangeX_n
+        # dY[0], dY[-1] = dY_[0], dY_[-1]
+
+
+        # dY = dY.mean(axis=1)
+
+        dY = dY.sum(axis=1)/self.rangeX_n
 
         self.del_Y = dY
         return self.del_Y
@@ -149,8 +154,17 @@ class Spline1D(object):
         ########################################
 
         ## can choose any of below options for calculating gradient of X
-        dX = dX.mean(axis=1)
+        dX = dX.mean(axis=1)  ### this works best
+
         # dX = dX.sum(axis=1)/self.rangeX_n
+
+        # dX_ = dX.sum(axis=1)/self.rangeX_n  
+        # dX = dX.mean(axis=1)
+        # dX[0], dX[-1] = dX_[0], dX_[-1]
+
+        # dX_ = dX.mean(axis=1)
+        # dX = dX.sum(axis=1)/self.rangeX_n
+        # dX[0], dX[-1] = dX_[0], dX_[-1]
 
         self.del_X = dX
         return self.del_X
@@ -171,6 +185,8 @@ class Spline1D(object):
         self._backward_X_()
         self._backward_input_()
         return self.del_input
+
+    
 
 ####################################################################################
 
