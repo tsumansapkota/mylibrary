@@ -123,7 +123,7 @@ class Region():
         self.spline_nd.del_X[self.indices] = self.spline_nd.del_X[self.indices] + Xgrad        
 
         return (del_output @ self.coeff[:-1].T)
-
+ 
     
 
 class SplineND(object):
