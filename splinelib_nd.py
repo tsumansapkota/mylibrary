@@ -40,13 +40,13 @@ import abc
 
 
 class Region():
-    def __init__(self, indices, spline_nd):
+    def __init__(self, indices, SND):
         '''
         The points must list of indices
         '''
         self.indices = indices
-        self.spline_nd = spline_nd
-        assert len(self.indices) == self.spline_nd.input_dim + 1
+        self.SND = SND
+        assert len(self.indices) == self.SND.input_dim + 1
 
         self.coeff = None
         self.inside_indx = None
@@ -57,14 +57,14 @@ class Region():
         return self.indices
 
     def get_points(self):
-        return self.spline_nd.X[self.indices], self.spline_nd.Y[self.indices]
+        return self.SND.X[self.indices], self.SND.Y[self.indices]
 
     def is_point_inside(self, point):
         if point is not np.ndarray:
             point = np.array(point)
         ##### The algorithm defined here at : http://steve.hollasch.net/cgindex/geometry/ptintet.html
         ones = np.ones([len(self.indices),1])
-        R_ = self.spline_nd.X[self.indices]
+        R_ = self.SND.X[self.indices]
 
         R = np.hstack([R_, ones])
         detR = np.linalg.det(R)
@@ -87,7 +87,7 @@ class Region():
     def calculate_interpolation_coefficient_matrix(self):
         X_temp,Y_ = self.get_points()
 
-        ones = np.ones([self.spline_nd.input_dim+1, 1])
+        ones = np.ones([self.SND.input_dim+1, 1])
         X_ = np.hstack([X_temp, ones])
         self.X_inv = np.linalg.inv(X_)
         self.coeff = self.X_inv @ Y_
@@ -97,34 +97,63 @@ class Region():
     def forward(self):
         self.calculate_interpolation_coefficient_matrix()
 
-        self.inside_indx = self.get_points_inside(self.spline_nd.input)
-        inputs = self.spline_nd.input[self.inside_indx]
+        self.inside_indx = self.get_points_inside(self.SND.input)
+        inputs = self.SND.input[self.inside_indx]
 
         inputs_new = np.hstack([inputs, np.ones([len(inputs), 1])])
         self.temp_input = inputs_new
         outputs = inputs_new @ self.coeff
-        return outputs
+
+        self.SND.output[self.inside_indx] = outputs
+        return #outputs
 
     def backward(self):
-        del_output = self.spline_nd.del_output[self.inside_indx]
+        del_output = self.SND.del_output[self.inside_indx]
         m = len(self.inside_indx)
         # countig the number of gradients
-        self.spline_nd.count[self.indices] = self.spline_nd.count[self.indices] + m
+        self.SND.count[self.indices] = self.SND.count[self.indices] + m
 
         del_coeff = (self.temp_input.T @ del_output )/m 
-        # print((self.spline_nd.input[self.inside_indx]).T.shape, del_output.shape)
+        # print((self.SND.input[self.inside_indx]).T.shape, del_output.shape)
 
         # adding all the gradients
         Ygrad = self.X_inv.T @ del_coeff
-        self.spline_nd.del_Y[self.indices] = self.spline_nd.del_Y[self.indices] + Ygrad
+        self.SND.del_Y[self.indices] = self.SND.del_Y[self.indices] + Ygrad
         # Xgrad = ((Ygrad/m)@self.coeff.T)[:,:-1]
         # Xgrad = (Ygrad@self.coeff.T)[:,:-1]
         Xgrad = Ygrad@((self.coeff[:-1]).T)
-        self.spline_nd.del_X[self.indices] = self.spline_nd.del_X[self.indices] + Xgrad        
+        self.SND.del_X[self.indices] = self.SND.del_X[self.indices] + Xgrad        
 
-        return (del_output @ self.coeff[:-1].T)
+        # return (del_output @ self.coeff[:-1].T)
+        self.SND.del_input[self.inside_indx] = del_output @ self.coeff[:-1].T
+        return
  
+class Node():
+
+    def __init__(self, indices, SND):
+        self.indices = indices
+        self.SND = SND
+        assert len(self.indices) == self.SND.input_dim + 1
+
+        self.child = Region(indices, SND)
+        self.is_branch = False
+        #self.child = [R1, R2, ... ]
+
+    def forward(self):
+        if self.is_branch: ### if the Node is decision node and branches
+            for ch in self.child:
+                pass
+        else:
+            self.child.forward()
     
+    def backward(self):
+        if self.is_branch: ### if the Node is decision node and branches
+            for ch in self.child:
+                pass
+        else:
+            self.child.forward()
+    
+
 
 class SplineND(object):
 
@@ -203,11 +232,8 @@ class SplineND(object):
         self.input = input
         self.output = np.zeros([len(input), 1])
 
-        self.root.calculate_interpolation_coefficient_matrix()
-        self.inside_indx = self.root.get_points_inside(self.input)
-        # print(insides)
         # self.output[self.inside_indx] = self.root.forward(self.input[self.inside_indx])
-        self.output[self.root.inside_indx] = self.root.forward()
+        self.root.forward()
 
         # isInside = self.root.is_point_inside(input)
         ########### interpolate y given x for all points ############
@@ -217,9 +243,10 @@ class SplineND(object):
 
     def backward(self, del_output):
         self.del_output = del_output
-        del_input = np.zeros_like(self.input)
-        del_input[self.root.inside_indx] = self.root.backward()
-        return del_input
+        self.del_input = np.zeros_like(self.input)
+
+        self.root.backward()
+        return self.del_input
 
     def update(self, lr=0.1):
         # gradX = (self.del_X/self.count)
