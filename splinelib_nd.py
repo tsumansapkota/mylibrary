@@ -44,6 +44,12 @@ class Region():
         '''
         self.indices = indices
         self.spline_nd = spline_nd
+        assert len(self.indices) == self.spline_nd.input_dim + 1
+
+        self.input = None
+        self.coeff = None
+        self.del_coeff = None
+
 
     def get_indices(self):
         return self.indices
@@ -54,25 +60,77 @@ class Region():
     def is_point_inside(self, point):
         if point is not np.ndarray:
             point = np.array(point)
-
+        ##### The algorithm defined here at : http://steve.hollasch.net/cgindex/geometry/ptintet.html
         ones = np.ones([len(self.indices),1])
         R_ = self.spline_nd.X[self.indices]
-        # Ri = np.zeros_like(R)
 
         R = np.hstack([R_, ones])
         detR = np.linalg.det(R)
-        # Ri = np.hstack([Ri, ones])
-        # print(R, detR)
-        for i, ind in enumerate(self.indices):
+        for i in range(len(self.indices)):
             Rtemp = R.copy()
             Rtemp[i,:-1] = point
-            # print('...\n', Rtemp)
-            # Ri = Ri + Rtemp
-            # print(Ri)
             det = np.linalg.det(Rtemp)
-            # print(det)
-            if det*detR < 0: return False
+            
+            if det*detR < 0:
+                return False
         return True
+
+    def get_points_inside(self, points):
+        inside = []
+        for i, pt in enumerate(points):
+            if self.is_point_inside(pt):
+                inside.append(i)
+        return np.array(inside, dtype=np.int)
+
+    def calculate_interpolation_coefficient_matrix(self):
+        X_temp,Y_ = self.get_points()
+
+        ones = np.ones([self.spline_nd.input_dim+1, 1])
+        self.X_ = np.hstack([X_temp, ones])
+        self.X_inv = np.linalg.inv(self.X_)
+        self.coeff = self.X_inv @ Y_.reshape(-1,1)
+
+        return self.coeff
+
+    def forward(self, inputs):
+        # self.calculate_interpolation_coefficient_matrix()
+
+        # input = self.spline_nd.input
+        # inside_indx = self.get_points_inside(input)
+        # inputs = input[inside_indx]
+
+        inputs_new = np.hstack([inputs, np.ones([len(inputs), 1])])
+        self.input = inputs_new
+        outputs = inputs_new @ self.coeff
+        return outputs
+
+    def backward_X(self, del_output):
+        pass
+
+    def backward_Y(self, del_output):
+        pass
+
+
+    def backward(self, del_output):
+        m = len(self.input)
+        self.del_coeff = (self.input.T @ del_output )/m 
+
+        # adding all the gradients
+        Ygrad = self.X_inv.T @ self.del_coeff
+        self.spline_nd.del_Y[self.indices] = self.spline_nd.del_Y[self.indices] + Ygrad.reshape(-1)
+        # countig the number of gradients
+        self.spline_nd.count[self.indices] = self.spline_nd.count[self.indices] + m
+
+        # Xgrad = ((Ygrad/m)@self.coeff.T)[:,:-1]
+        Xgrad = (Ygrad@self.coeff.T)[:,:-1]
+        # print(Xgrad.shape, Ygrad.shape, self.coeff.shape)
+        self.spline_nd.del_X[self.indices] = self.spline_nd.del_X[self.indices] + Xgrad        
+
+        # print(self.del_coeff.shape, self.coeff.shape)
+        return (del_output @ self.coeff.T)[:,:-1]
+
+        
+        
 
     
 
@@ -89,27 +147,89 @@ class SplineND(object):
 
         self.X = None
         self.Y = None
-        self.root:Region = None
+        self.count = None
+        self.root:Region = None #Region([i for i in range(self.input_dim+1)], self)
 
         self.input = None
+        self.inside_indx = None
         self.output = None
+
+        self.del_output = None
+        self.del_X = None
+        self.del_Y = None
 
         self._initialize_()
 
 
     def _initialize_(self,):
-        self.X = np.random.uniform(low=-1, high=1, size=[self.input_dim+1, self.input_dim])
-        self.Y = np.zeros(self.input_dim+1)
+        # self.X = np.random.uniform(low=-1, high=1, size=[self.input_dim+1, self.input_dim])
+        self.X = np.random.normal(0, 1, size=[self.input_dim+1, self.input_dim])
+        # self.Y = np.zeros(self.input_dim+1)
+        self.Y = np.random.uniform(size=self.input_dim+1)
+
+        self.del_X = np.zeros_like(self.X)
+        self.del_Y = np.zeros_like(self.Y)
+        self.count = np.zeros_like(self.Y, dtype=np.int)
 
         self.root = Region([i for i in range(self.input_dim+1)], self)
         return
 
+    def make_root_global_coverage(self, globalX):
+        '''
+        globlalX should have shape (n, nD...)
+        '''
+        for gx in globalX:
+            if not self.root.is_point_inside(gx):
+
+                # pts = self.root.get_points()[0]
+                indices = self.root.get_indices()
+                pts = self.X[indices]
+
+                center_pt = np.mean(pts, axis=0,keepdims=True)
+                cpts = pts - center_pt
+
+                direction = cpts/np.linalg.norm(cpts, ord=2, axis=1, keepdims=True)
+
+                diffs = pts - gx
+                dists = np.linalg.norm(diffs, ord=2, axis=1) + 1e-5 ### for gradient in the update section
+                indx = np.argmin(dists)
+                
+                gindx = indices[indx]
+                self.X[gindx] = pts[indx] + direction[indx]*dists[indx]  ### update
+        return
+
     def forward(self, input):
         self.input = input
-        # print(self.X)
-        # print(self.Y)
-        # print(self.root.get_points())
-        # print('________')
-        # print(self.root.is_point_inside(input))
-        isInside = self.root.is_point_inside(input)
-        return isInside
+        self.output = np.zeros([len(input), 1])
+        self.root.calculate_interpolation_coefficient_matrix()
+        self.inside_indx = self.root.get_points_inside(self.input)
+        # print(insides)
+        self.output[self.inside_indx] = self.root.forward(self.input[self.inside_indx])
+
+        # isInside = self.root.is_point_inside(input)
+        ########### interpolate y given x for all points ############
+        
+
+        return self.output
+
+    def backward(self, del_output):
+        self.del_output = del_output
+        del_input = np.zeros_like(self.input)
+        del_input[self.inside_indx] = self.root.backward(self.del_output[self.inside_indx])
+        return del_input
+
+    def update(self, lr=0.1):
+        # gradX = (self.del_X/self.count.reshape(-1,1))
+        # gradY = (self.del_Y/self.count)
+        # # print(gradX, gradY)
+        # self.X = self.X - lr*gradX
+        # self.Y = self.Y - lr*gradY
+
+        self.X = self.X - lr*self.del_X
+        self.Y = self.Y - lr*self.del_Y
+
+        self.count *= 0
+        self.del_X *= 0
+        self.del_Y *= 0
+
+

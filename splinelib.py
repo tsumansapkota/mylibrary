@@ -8,13 +8,18 @@ class Spline1D(object):
         self.n_max = max_points # max point is constant
         self.eps = epsilon
         
-        X_ = np.random.uniform(x.min()+epsilon, x.max()-epsilon, size=(max_points-2))
-        X = np.empty(shape=(self.n_points))
-        X[1:-1] = X_
-        X[0], X[-1] = x.min()-epsilon, x.max()+epsilon
-        self.X = X
+        # X_ = np.random.uniform(x.min()+epsilon, x.max()-epsilon, size=(max_points-2))
+        # X = np.empty(shape=(self.n_points))
+        # X[1:-1] = X_
+        # X[0], X[-1] = x.min()-epsilon, x.max()+epsilon
+        # self.X = X
+        self.X = np.linspace(x.min()-epsilon, x.max()+epsilon, num=max_points)
 
-        self.Y = np.random.uniform(y.min(), y.max(), size=(max_points))
+        self.Y = np.random.uniform(y.min(), y.max(), size=(max_points))/2.
+        # self.Y = np.zeros(shape=max_points)
+        self.Y = np.sort(self.Y)
+        # self.X = np.sort(self.X)    
+
         self.rangeX = None
         self.rangeX_n = None
         self.diffX = None
