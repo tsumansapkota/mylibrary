@@ -1,4 +1,5 @@
 import numpy as np
+import abc
 
 '''
 - We need to divide the whole input space into regions.
@@ -37,6 +38,7 @@ import numpy as np
 #         return
 
 
+
 class Region():
     def __init__(self, indices, spline_nd):
         '''
@@ -46,10 +48,10 @@ class Region():
         self.spline_nd = spline_nd
         assert len(self.indices) == self.spline_nd.input_dim + 1
 
-        self.input = None
         self.coeff = None
-        self.del_coeff = None
+        self.inside_indx = None
 
+        self.temp_input = None
 
     def get_indices(self):
         return self.indices
@@ -86,51 +88,41 @@ class Region():
         X_temp,Y_ = self.get_points()
 
         ones = np.ones([self.spline_nd.input_dim+1, 1])
-        self.X_ = np.hstack([X_temp, ones])
-        self.X_inv = np.linalg.inv(self.X_)
-        self.coeff = self.X_inv @ Y_.reshape(-1,1)
+        X_ = np.hstack([X_temp, ones])
+        self.X_inv = np.linalg.inv(X_)
+        self.coeff = self.X_inv @ Y_
 
         return self.coeff
 
-    def forward(self, inputs):
-        # self.calculate_interpolation_coefficient_matrix()
+    def forward(self):
+        self.calculate_interpolation_coefficient_matrix()
 
-        # input = self.spline_nd.input
-        # inside_indx = self.get_points_inside(input)
-        # inputs = input[inside_indx]
+        self.inside_indx = self.get_points_inside(self.spline_nd.input)
+        inputs = self.spline_nd.input[self.inside_indx]
 
         inputs_new = np.hstack([inputs, np.ones([len(inputs), 1])])
-        self.input = inputs_new
+        self.temp_input = inputs_new
         outputs = inputs_new @ self.coeff
         return outputs
 
-    def backward_X(self, del_output):
-        pass
-
-    def backward_Y(self, del_output):
-        pass
-
-
-    def backward(self, del_output):
-        m = len(self.input)
-        self.del_coeff = (self.input.T @ del_output )/m 
-
-        # adding all the gradients
-        Ygrad = self.X_inv.T @ self.del_coeff
-        self.spline_nd.del_Y[self.indices] = self.spline_nd.del_Y[self.indices] + Ygrad.reshape(-1)
+    def backward(self):
+        del_output = self.spline_nd.del_output[self.inside_indx]
+        m = len(self.inside_indx)
         # countig the number of gradients
         self.spline_nd.count[self.indices] = self.spline_nd.count[self.indices] + m
 
+        del_coeff = (self.temp_input.T @ del_output )/m 
+        # print((self.spline_nd.input[self.inside_indx]).T.shape, del_output.shape)
+
+        # adding all the gradients
+        Ygrad = self.X_inv.T @ del_coeff
+        self.spline_nd.del_Y[self.indices] = self.spline_nd.del_Y[self.indices] + Ygrad
         # Xgrad = ((Ygrad/m)@self.coeff.T)[:,:-1]
-        Xgrad = (Ygrad@self.coeff.T)[:,:-1]
-        # print(Xgrad.shape, Ygrad.shape, self.coeff.shape)
+        # Xgrad = (Ygrad@self.coeff.T)[:,:-1]
+        Xgrad = Ygrad@((self.coeff[:-1]).T)
         self.spline_nd.del_X[self.indices] = self.spline_nd.del_X[self.indices] + Xgrad        
 
-        # print(self.del_coeff.shape, self.coeff.shape)
-        return (del_output @ self.coeff.T)[:,:-1]
-
-        
-        
+        return (del_output @ self.coeff[:-1].T)
 
     
 
@@ -164,14 +156,15 @@ class SplineND(object):
     def _initialize_(self,):
         # self.X = np.random.uniform(low=-1, high=1, size=[self.input_dim+1, self.input_dim])
         self.X = np.random.normal(0, 1, size=[self.input_dim+1, self.input_dim])
-        # self.Y = np.zeros(self.input_dim+1)
-        self.Y = np.random.uniform(size=self.input_dim+1)
+        # self.Y = np.zeros((self.input_dim+1, 1))
+        self.Y = np.random.uniform(size=(self.input_dim+1, 1))
 
         self.del_X = np.zeros_like(self.X)
         self.del_Y = np.zeros_like(self.Y)
         self.count = np.zeros_like(self.Y, dtype=np.int)
 
         self.root = Region([i for i in range(self.input_dim+1)], self)
+
         return
 
     def make_root_global_coverage(self, globalX):
@@ -196,15 +189,25 @@ class SplineND(object):
                 
                 gindx = indices[indx]
                 self.X[gindx] = pts[indx] + direction[indx]*dists[indx]  ### update
-        return
+        pass
+    
+    # def make_root_global_coverage2(self, globalX):
+    #     for gx in globalX:
+    #         if not self.root.is_point_inside(gx):
+                
+    #             pass
+
+    #     pass
 
     def forward(self, input):
         self.input = input
         self.output = np.zeros([len(input), 1])
+
         self.root.calculate_interpolation_coefficient_matrix()
         self.inside_indx = self.root.get_points_inside(self.input)
         # print(insides)
-        self.output[self.inside_indx] = self.root.forward(self.input[self.inside_indx])
+        # self.output[self.inside_indx] = self.root.forward(self.input[self.inside_indx])
+        self.output[self.root.inside_indx] = self.root.forward()
 
         # isInside = self.root.is_point_inside(input)
         ########### interpolate y given x for all points ############
@@ -215,11 +218,11 @@ class SplineND(object):
     def backward(self, del_output):
         self.del_output = del_output
         del_input = np.zeros_like(self.input)
-        del_input[self.inside_indx] = self.root.backward(self.del_output[self.inside_indx])
+        del_input[self.root.inside_indx] = self.root.backward()
         return del_input
 
     def update(self, lr=0.1):
-        # gradX = (self.del_X/self.count.reshape(-1,1))
+        # gradX = (self.del_X/self.count)
         # gradY = (self.del_Y/self.count)
         # # print(gradX, gradY)
         # self.X = self.X - lr*gradX
