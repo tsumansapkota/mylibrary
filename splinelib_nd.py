@@ -117,7 +117,7 @@ class Region():
         # countig the number of gradients
         self.SND.count[self.indices] = self.SND.count[self.indices] + m
 
-        del_coeff = (self.temp_input.T @ del_output )/m 
+        del_coeff = (self.temp_input.T @ del_output )#/m 
         # print((self.SND.input[self.inside_indx]).T.shape, del_output.shape)
 
         # adding all the gradients
@@ -140,28 +140,30 @@ class Node():
         assert len(self.indices) == self.SND.input_dim + 1
 
         self.child = Region(indices, SND)
+        self.splitNodes = []
         self.is_branch = False
+        self.split_index = None
         #self.child = [R1, R2, ... ]
 
     def forward(self):
         if self.is_branch: ### if the Node is decision node and branches
-            for ch in self.child:
-                pass
+            for node in self.splitNodes:
+                node.forward()
         else:
             self.child.forward()
     
     def backward(self):
         if self.is_branch: ### if the Node is decision node and branches
-            for ch in self.child:
-                pass
+            for node in self.splitNodes:
+                node.backward()
         else:
-            self.child.forward()
+            self.child.backward()
 
     def break_region(self):
         if not self.is_branch:
             OX, OY = self.child.get_points()
             newX, newY = OX.mean(axis=0, keepdims=True), OY.mean(axis=0, keepdims=True)
-            new_indx = len(self.SND.X)
+            self.split_index = len(self.SND.X)
 
             self.SND.X = np.append(self.SND.X, newX, axis=0)
             self.SND.Y = np.append(self.SND.Y, newY, axis=0)
@@ -169,13 +171,40 @@ class Node():
             self.SND._init_gradients_()
 
             comb_points = list(combinations(self.indices, len(self.indices)-1) )
-            # self.child = []
-            # self.is_branch = True
+            # print(comb_points)
+            self.splitNodes = []
+            self.is_branch = True
             for cpt in comb_points:
-                cpt = list(cpt).append(new_indx)
-                print(cpt)
-                # newNode = Node(cpt, self.SND)
-                # self.child.append(newNode)
+                cpt = list(cpt); cpt.append(self.split_index)
+                # print(cpt)
+                newNode = Node(cpt, self.SND)
+                self.splitNodes.append(newNode)
+        else:
+            OX, OY = self.child.get_points()
+            newX, newY = OX.mean(axis=0, keepdims=True), OY.mean(axis=0, keepdims=True)
+
+            self.SND.X[self.split_index] = newX
+            self.SND.Y[self.split_index] = newY
+
+            self.SND._init_gradients_()
+
+            comb_points = list(combinations(self.indices, len(self.indices)-1) )
+            # print(comb_points)
+            self.splitNodes = []
+            for cpt in comb_points:
+                cpt = list(cpt); cpt.append(self.split_index)
+                # print(cpt)
+                newNode = Node(cpt, self.SND)
+                self.splitNodes.append(newNode)
+
+    def get_maximum_error_node(self):
+        if self.is_branch: ### if the Node is decision node and branches
+            for node in self.splitNodes:
+                node.forward()
+        else:
+            self.child.forward()
+    
+
 
 
 
@@ -198,7 +227,7 @@ class SplineND(object):
         self.X = None
         self.Y = None
         self.count = None
-        self.root:Region = None #Region([i for i in range(self.input_dim+1)], self)
+        self.root:Node = None #Node([i for i in range(self.input_dim+1)], self)
 
         self.input = None
         self.inside_indx = None
@@ -225,7 +254,7 @@ class SplineND(object):
         self.Y = np.random.uniform(size=(self.input_dim+1, 1))
         self._init_gradients_()
 
-        self.root = Region([i for i in range(self.input_dim+1)], self)
+        self.root = Node([i for i in range(self.input_dim+1)], self)
 
         return
 
@@ -234,16 +263,17 @@ class SplineND(object):
         globlalX should have shape (n, nD...)
         '''
         for gx in globalX:
-            if not self.root.is_point_inside(gx):
+            if not self.root.child.is_point_inside(gx):
 
                 # pts = self.root.get_points()[0]
-                indices = self.root.get_indices()
+                indices = self.root.indices
                 pts = self.X[indices]
 
                 center_pt = np.mean(pts, axis=0,keepdims=True)
                 cpts = pts - center_pt
 
                 direction = cpts/np.linalg.norm(cpts, ord=2, axis=1, keepdims=True)
+                # print(direction)
 
                 diffs = pts - gx
                 dists = np.linalg.norm(diffs, ord=2, axis=1) + 1e-5 ### for gradient in the update section
@@ -251,15 +281,40 @@ class SplineND(object):
                 
                 gindx = indices[indx]
                 self.X[gindx] = pts[indx] + direction[indx]*dists[indx]  ### update
-        pass
+        return
     
-    # def make_root_global_coverage2(self, globalX):
-    #     for gx in globalX:
-    #         if not self.root.is_point_inside(gx):
-                
-    #             pass
+    def make_root_global_coverage2(self, globalX=None):
+        if globalX is None:
+            globalX = self.input
 
-    #     pass
+        for _ in range(10):
+            for gx in globalX:
+                if not self.root.child.is_point_inside(gx):
+                    indices = self.root.indices
+                    pts = self.X[indices]
+
+                    center_pt = np.mean(pts, axis=0,keepdims=True)
+                    cpts = pts - center_pt
+
+                    direction = cpts/np.linalg.norm(cpts, ord=2, axis=1, keepdims=True)
+                    # print(direction)
+
+                    diffs = pts - gx
+                    dists = np.linalg.norm(diffs, ord=2, axis=1) + 1e-5 ### for gradient in the update section
+                    indx = np.argmin(dists)
+                    
+                    gindx = indices[indx]
+                    self.X[gindx] = pts[indx] + direction[indx]*dists[indx]*0.1  ### update
+
+        return
+    
+    def _get_maximum_error_node(self):
+
+
+    def add_new_point(self):
+        pass        
+
+
 
     def forward(self, input):
         self.input = input
@@ -282,14 +337,15 @@ class SplineND(object):
         return self.del_input
 
     def update(self, lr=0.1):
-        # gradX = (self.del_X/self.count)
-        # gradY = (self.del_Y/self.count)
-        # # print(gradX, gradY)
-        # self.X = self.X - lr*gradX
-        # self.Y = self.Y - lr*gradY
+        self.count = self.count + 1
+        gradX = (self.del_X/self.count)
+        gradY = (self.del_Y/self.count)
+        # print(gradX, gradY)
+        self.X = self.X - lr*gradX
+        self.Y = self.Y - lr*gradY
 
-        self.X = self.X - lr*self.del_X
-        self.Y = self.Y - lr*self.del_Y
+        # self.X = self.X - lr*self.del_X
+        # self.Y = self.Y - lr*self.del_Y
 
         self.count *= 0
         self.del_X *= 0
