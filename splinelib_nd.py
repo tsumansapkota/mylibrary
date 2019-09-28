@@ -1,5 +1,6 @@
 import numpy as np
 import abc
+from itertools import combinations 
 
 '''
 - We need to divide the whole input space into regions.
@@ -95,11 +96,12 @@ class Region():
         return self.coeff
 
     def forward(self):
+        self.inside_indx = self.get_points_inside(self.SND.input)
+        if len(self.inside_indx) == 0: return
+
         self.calculate_interpolation_coefficient_matrix()
 
-        self.inside_indx = self.get_points_inside(self.SND.input)
         inputs = self.SND.input[self.inside_indx]
-
         inputs_new = np.hstack([inputs, np.ones([len(inputs), 1])])
         self.temp_input = inputs_new
         outputs = inputs_new @ self.coeff
@@ -108,6 +110,8 @@ class Region():
         return #outputs
 
     def backward(self):
+        if len(self.inside_indx) == 0: return
+
         del_output = self.SND.del_output[self.inside_indx]
         m = len(self.inside_indx)
         # countig the number of gradients
@@ -152,6 +156,31 @@ class Node():
                 pass
         else:
             self.child.forward()
+
+    def break_region(self):
+        if not self.is_branch:
+            OX, OY = self.child.get_points()
+            newX, newY = OX.mean(axis=0, keepdims=True), OY.mean(axis=0, keepdims=True)
+            new_indx = len(self.SND.X)
+
+            self.SND.X = np.append(self.SND.X, newX, axis=0)
+            self.SND.Y = np.append(self.SND.Y, newY, axis=0)
+
+            self.SND._init_gradients_()
+
+            comb_points = list(combinations(self.indices, len(self.indices)-1) )
+            # self.child = []
+            # self.is_branch = True
+            for cpt in comb_points:
+                cpt = list(cpt).append(new_indx)
+                print(cpt)
+                # newNode = Node(cpt, self.SND)
+                # self.child.append(newNode)
+
+
+
+
+        
     
 
 
@@ -182,15 +211,19 @@ class SplineND(object):
         self._initialize_()
 
 
+    def _init_gradients_(self):
+        self.del_X = np.zeros_like(self.X)
+        self.del_Y = np.zeros_like(self.Y)
+        self.count = np.zeros_like(self.Y, dtype=np.int)
+
+        
+
     def _initialize_(self,):
         # self.X = np.random.uniform(low=-1, high=1, size=[self.input_dim+1, self.input_dim])
         self.X = np.random.normal(0, 1, size=[self.input_dim+1, self.input_dim])
         # self.Y = np.zeros((self.input_dim+1, 1))
         self.Y = np.random.uniform(size=(self.input_dim+1, 1))
-
-        self.del_X = np.zeros_like(self.X)
-        self.del_Y = np.zeros_like(self.Y)
-        self.count = np.zeros_like(self.Y, dtype=np.int)
+        self._init_gradients_()
 
         self.root = Region([i for i in range(self.input_dim+1)], self)
 
