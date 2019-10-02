@@ -161,8 +161,11 @@ class Node():
 
     def break_region(self):
         if not self.is_branch:
-            OX, OY = self.child.get_points()
-            newX, newY = OX.mean(axis=0, keepdims=True), OY.mean(axis=0, keepdims=True)
+            # OX, OY = self.child.get_points()
+            # newX, newY = OX.mean(axis=0, keepdims=True), OY.mean(axis=0, keepdims=True)
+            newX = (self.SND.input[self.child.inside_indx]).mean(axis=0, keepdims=True)
+            newY = (self.SND.Y[self.indices]).mean(axis=0, keepdims=True)
+
             self.split_index = len(self.SND.X)
 
             self.SND.X = np.append(self.SND.X, newX, axis=0)
@@ -199,14 +202,27 @@ class Node():
 
     def get_maximum_error_node(self):
         if self.is_branch: ### if the Node is decision node and branches
+            max_err = 0.
+            me_node = None
             for node in self.splitNodes:
-                node.forward()
+                error, enode = node.get_maximum_error_node()
+                # print('---', error)
+                if error > max_err:
+                    max_err, me_node = error, enode
+            # print(max_err)
+            return max_err, me_node
+
         else:
-            self.child.forward()
+            del_output = self.SND.del_output[self.child.indices]
+            err = (del_output**2).mean()
+            # err = (del_output**2).sum()
+            # err = np.abs(del_output).mean()
+            # err = np.abs(del_output).sum()
+
+
+
+            return err, self
     
-
-
-
 
 
         
@@ -288,8 +304,10 @@ class SplineND(object):
             globalX = self.input
 
         for _ in range(10):
+            BREAK_NOW = True
             for gx in globalX:
                 if not self.root.child.is_point_inside(gx):
+                    BREAK_NOW = False
                     indices = self.root.indices
                     pts = self.X[indices]
 
@@ -305,16 +323,14 @@ class SplineND(object):
                     
                     gindx = indices[indx]
                     self.X[gindx] = pts[indx] + direction[indx]*dists[indx]*0.1  ### update
+            if BREAK_NOW: break
 
         return
-    
-    def _get_maximum_error_node(self):
-
 
     def add_new_point(self):
-        pass        
-
-
+        err, node = self.root.get_maximum_error_node()
+        node.break_region()
+        return        
 
     def forward(self, input):
         self.input = input
@@ -337,15 +353,27 @@ class SplineND(object):
         return self.del_input
 
     def update(self, lr=0.1):
-        self.count = self.count + 1
-        gradX = (self.del_X/self.count)
-        gradY = (self.del_Y/self.count)
-        # print(gradX, gradY)
-        self.X = self.X - lr*gradX
-        self.Y = self.Y - lr*gradY
+        ######## Method 1    
+        # self.count = self.count + 1
+        # gradX = (self.del_X/self.count)
+        # gradY = (self.del_Y/self.count)
+        # self.X = self.X - lr*gradX
+        # self.Y = self.Y - lr*gradY
 
+        ######## Method 2
         # self.X = self.X - lr*self.del_X
         # self.Y = self.Y - lr*self.del_Y
+
+
+        ######## Method 3
+        m = len(self.input)    
+        gradX = self.del_X/m
+        gradY = self.del_Y/m
+        # gradY = self.del_Y/(self.count+1)
+        #####################################
+
+        self.X = self.X - lr*gradX
+        self.Y = self.Y - lr*gradY
 
         self.count *= 0
         self.del_X *= 0

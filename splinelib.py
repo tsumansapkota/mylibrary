@@ -8,17 +8,17 @@ class Spline1D(object):
         self.n_max = max_points # max point is constant
         self.eps = epsilon
         
-        # X_ = np.random.uniform(x.min()+epsilon, x.max()-epsilon, size=(max_points-2))
-        # X = np.empty(shape=(self.n_points))
-        # X[1:-1] = X_
-        # X[0], X[-1] = x.min()-epsilon, x.max()+epsilon
-        # self.X = X
-        self.X = np.linspace(x.min()-epsilon, x.max()+epsilon, num=max_points)
+        X_ = np.random.uniform(x.min()+epsilon, x.max()-epsilon, size=(max_points-2))
+        X = np.empty(shape=(self.n_points))
+        X[1:-1] = X_
+        X[0], X[-1] = x.min()-epsilon, x.max()+epsilon
+        self.X = X
+        # self.X = np.linspace(x.min()-epsilon, x.max()+epsilon, num=max_points)
 
         self.Y = np.random.uniform(y.min(), y.max(), size=(max_points))/2.
         # self.Y = np.zeros(shape=max_points)
         self.Y = np.sort(self.Y)
-        # self.X = np.sort(self.X)    
+        self.X = np.sort(self.X)    
 
         self.rangeX = None
         self.rangeX_n = None
@@ -258,8 +258,15 @@ class Spline1D(object):
             dYerr = (dYs**2).mean(axis=1)
             index = np.argmax(dYerr)
             if dYerr[index] > min_error:
-                newpx = (self.X[index] + self.X[index+1])/2.
+
+                # newpx = (self.rangeX[index] * self.del_output.reshape(-1)).mean()
+
+                # newpx = (self.X[index] + self.X[index+1])/2.
                 newpy = (self.Y[index] + self.Y[index+1])/2.
+
+                newpx = np.random.uniform(self.X[index] , self.X[index+1])
+                # newpy = np.random.uniform(self.Y[index] , self.Y[index+1])
+
                 # adding new interpolation points
                 self.X = np.append(self.X, newpx)
                 self.Y = np.append(self.Y, newpy)
