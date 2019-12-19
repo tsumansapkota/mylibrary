@@ -260,11 +260,16 @@ class Spline1D(object):
             if dYerr[index] > min_error:
 
                 # newpx = (self.rangeX[index] * self.del_output.reshape(-1)).mean()
-
+                # newpx = np.random.uniform(self.X[index] , self.X[index+1])
                 # newpx = (self.X[index] + self.X[index+1])/2.
-                newpy = (self.Y[index] + self.Y[index+1])/2.
 
-                newpx = np.random.uniform(self.X[index] , self.X[index+1])
+                midpx = (self.X[index] + self.X[index+1])/2.
+                length = self.X[index+1] - self.X[index]
+                randn = np.random.normal(loc = midpx, scale=length/3.5)
+                newpx = np.clip(randn, self.X[index]+(length*0.05), self.X[index+1]-(length*0.05))
+
+
+                newpy = (self.Y[index] + self.Y[index+1])/2.
                 # newpy = np.random.uniform(self.Y[index] , self.Y[index+1])
 
                 # adding new interpolation points

@@ -31,7 +31,8 @@ class MseLoss(LossFunction):
 
 class CrossEntropyBinary(LossFunction):
     @staticmethod
-    def loss(output, target):
+    def loss(output, target, epsilon=1e-11):
+        output = output.clip(epsilon, 1 - epsilon)
         # return -np.mean(np.sum(target * np.log(output) + (1 - target) * np.log(1 - output), axis=1))
         return -((target * np.log(output) + (1 - target) * np.log(1 - output)).sum(axis=1)).mean()
 
@@ -72,7 +73,10 @@ class CrossEntropyLoss(LossFunction):
 
     @staticmethod
     def del_loss(output, target, epsilon=1e-11):
-        return output - target
+        # return output - target ## this is a mistake mathematically,, but seems to work
+        output = output.clip(epsilon, 1 - epsilon)
+        return -target/output
+
 
 
 ##############################################################
@@ -482,6 +486,65 @@ class DoubleReluLayer(Layer):
         self.bias -= gradients
 
 
+class DoubleReluLinearLayer(Layer):
+
+    def __init__(self, input_dim, output_dim, weights=None, bias=None, optimizer=SGD()):
+        if weights is None:
+            # self.weights = np.random.randn(input_dim, output_dim) * 2 / (input_dim + output_dim)
+            # self.weights = (np.random.randn(input_dim, output_dim) * 0.2) - 0.1
+            input_dim *= 2
+            self.weights = np.random.randn(input_dim, output_dim) * np.sqrt(2. / input_dim)  # Xavier/He initialization
+        else:
+            self.weights = weights
+
+        if bias is None:
+            self.bias = np.zeros(output_dim)
+        else:
+            self.bias = bias
+
+
+        self.weightsOpt = optimizer.set_parameter(self.weights)
+        self.biasOpt = optimizer.set_parameter(self.bias)
+
+        self.activation = DoubleRelu()
+        layerList.pop(len(layerList) - 1)  # removing the activation(last ones) as a seperate layer
+        
+        self.input = None
+        self.zee = None
+        self.output = None
+
+        self.del_weights = None
+        self.del_bias = None
+        self.del_output = None
+        self.del_zee = None
+
+        layerList.append(self)
+        pass
+
+    def forward(self, input):
+        self.input = input
+        self.zee = self.activation.forward(self.input)
+        self.output = self.zee @ self.weights + self.bias  # @ == .dot
+        return self.output
+
+    def backward(self, output_delta):
+        self.del_output = output_delta
+        
+        m = output_delta.shape[0]
+        self.del_bias = np.mean(self.del_output, axis=0)  # * 1 / m
+        self.del_weights = self.zee.T.dot(self.del_output) * 1 / m
+
+        self.del_zee = self.del_output.dot(self.weights.T)
+        return self.activation.backward(self.del_zee)
+
+    def update(self):
+        self.activation.update()
+        gradients = self.weightsOpt.compute_gradient(self.del_weights)
+        self.weights -= gradients  # * learning_rate
+        gradients = self.biasOpt.compute_gradient(self.del_bias)
+        self.bias -= gradients  # * learning_rate
+        
+
 class LinearLayer(Layer):
     """
         Linear Layer class
@@ -525,6 +588,7 @@ class LinearLayer(Layer):
     def forward(self, input):
         self.input = input
         self.zee = input @ self.weights + self.bias  # @ == .dot
+        self.output = self.zee ######## useful when dont know linear or not.. general form
         return self.zee
 
     def backward(self, output_delta):
@@ -582,6 +646,7 @@ class NonLinearLayer(LinearLayer):
         return super().backward(self.del_zee)
 
     def update(self):
+        self.activation.update()
         super().update()
 
 
@@ -738,15 +803,23 @@ class BiasLayer(Layer):
 class AutoForm(Layer):
 
     def __init__(self, new_layers=False):
+        '''
+        If new_layers is false -> it will have global layers
+                         true  -> it will start new global layers
+                         list  -> it will have given list of layers
+        '''
         self.out = None
         self.input = None
         self.error = None
         self.layerList = []
         global layerList
-        if new_layers:
-            layerList = self.layerList
+        if isinstance(new_layers, list):
+            self.layerList = new_layers
         else:
-            self.layerList = layerList
+            if new_layers:
+                layerList = self.layerList
+            else:
+                self.layerList = layerList
 
     def collect_global_layers(self):
         global layerList
