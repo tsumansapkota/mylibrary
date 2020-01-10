@@ -17,30 +17,40 @@ Inter >> Processor_Neuron
 class Neuron(object):
 
     def __init__(self, position:tuple, activation = tnn.Linear(), max_synapse = 20 ):
-        self.position = position
+        self.position = np.array(position)
+        self.del_position = np.zeros_like(self.position)
         self.bias = 0.
         self.del_bias = 0.
         self.activation = activation
         self.max_synapse = max_synapse
         
         ### Synapse
-        self.weights = None
+        self.weights = 0.
         self.synapses = []
-        self.del_weights = None
+        self.diff = []
+        self.idist = []
+        self.del_weights = 0.
 
         ### Propagation
         self.outputs = None#[0]
-        self.del_outputs = None
+        self.del_outputs = 0
 
 
     def _initialize_connection_(self, synapses:list):
         self.synapses = synapses
-        self.weights = np.random.normal(size=len(synapses))
+        m = len(synapses)
+        self.weights = np.random.normal(size=m)
+        self.diff = [0]*m
+        self.idist = [0]*m
 
     def forward(self):
         self.outputs = 0.
         for i in range(len(self.synapses)):
-            self.outputs += (self.synapses[i].outputs * self.weights[i])
+            self.diff[i] = self.position - self.synapses[i].position
+            self.idist[i] = 1/(np.sqrt((self.diff[i]**2).sum()))
+
+            self.outputs += (self.synapses[i].outputs * self.weights[i] * self.idist[i])
+
         self.outputs += self.bias
         self.outputs = self.activation.forward(self.outputs)
 
@@ -50,13 +60,21 @@ class Neuron(object):
 
         self.del_weights = np.zeros_like(self.weights)
         for i in range(len(self.synapses)):
-            self.del_weights[i] =  np.mean(del_zee*self.synapses[i].outputs)
-            self.synapses[i].del_outputs = del_zee*self.weights[i]
+            self.del_weights[i] =  np.mean(del_zee*self.synapses[i].outputs) * self.idist[i]
+            self.synapses[i].del_outputs += del_zee * self.weights[i] * self.idist[i]
+            self.del_position += self.diff[i]/np.power(self.idist[i], 3.) * np.mean(del_zee*self.synapses[i].outputs)*self.weights[i]
+            self.synapses[i].del_position -= self.del_position
 
-    def update(self, learning_rate):
+
+    def update_params(self, learning_rate):
         self.bias -= learning_rate*self.del_bias
         self.weights -= learning_rate*self.del_weights
+        self.del_bias *= 0.
+        self.del_weights *= 0.
             
+    def update_position(self, learning_rate):
+        self.position -= learning_rate*self.del_position
+        self.del_position *= 0.
 
 
         
@@ -121,5 +139,9 @@ class NeuralNetwork(object):
         return del_inputs
 
     def update(self, learning_rate=0.01):
-        for neuron in self.inners+self.motors:
-            neuron.update(learning_rate)
+        for neuron in self.inners:
+            neuron.update_params(learning_rate)
+            neuron.update_position(learning_rate)
+
+        for neuron in self.motors:
+            neuron.update_params(learning_rate)
