@@ -73,7 +73,7 @@ class CrossEntropyLoss(LossFunction):
 
     @staticmethod
     def del_loss(output, target, epsilon=1e-11):
-        # return output - target ## this is a mistake mathematically,, but seems to work
+#         return output - target ## this is a mistake mathematically,, but seems to work
         output = output.clip(epsilon, 1 - epsilon)
         return -target/output
 
@@ -234,7 +234,15 @@ class Softmax(Layer):
 
     def backward(self, output_delta):
         self.del_output = output_delta
-        return (self.out * (1 - self.out)) * output_delta
+#         return (self.out * (1 - self.out)) * output_delta 
+        ## turns out softmax has complex derrivative
+#         https://stats.stackexchange.com/questions/267576/matrix-representation-of-softmax-derivatives-in-backpropagation
+#         https://github.com/danijar/layered/blob/master/layered/activation.py
+        delx = self.out * output_delta
+        sum_ = np.sum(delx, axis=1, keepdims=True)
+        delx -= self.out*sum_
+        return delx
+        
     
 
 class Negative(Layer):

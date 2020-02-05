@@ -16,8 +16,9 @@ Inter >> Processor_Neuron
 
 class Neuron(object):
 
-    def __init__(self, position:tuple, activation = tnn.Linear(), max_synapse = 20 ):
+    def __init__(self, position:tuple, activation = tnn.Linear(), optimizer=tnn.SGD(), max_synapse = 20 ):
         self.position = np.array(position)
+        self.cpg = 1 ## count position
         self.del_position = np.zeros_like(self.position)
         self.bias = 0.
         self.del_bias = 0.
@@ -62,8 +63,12 @@ class Neuron(object):
         for i in range(len(self.synapses)):
             self.del_weights[i] =  np.mean(del_zee*self.synapses[i].outputs) * self.idist[i]
             self.synapses[i].del_outputs += del_zee * self.weights[i] * self.idist[i]
-            self.del_position += self.diff[i]/np.power(self.idist[i], 3.) * np.mean(del_zee*self.synapses[i].outputs)*self.weights[i]
-            self.synapses[i].del_position -= self.del_position
+            
+            del_position_i = self.diff[i]/np.power(self.idist[i], 3.) * np.mean(del_zee*self.synapses[i].outputs)*self.weights[i]
+            self.del_position += del_position_i
+            self.synapses[i].del_position -= del_position_i
+            self.cpg += 1
+            self.synapses[i].cpg += 1
 
 
     def update_params(self, learning_rate):
@@ -71,27 +76,32 @@ class Neuron(object):
         self.weights -= learning_rate*self.del_weights
         self.del_bias *= 0.
         self.del_weights *= 0.
+        self.del_outputs *= 0.
             
     def update_position(self, learning_rate):
-        self.position -= learning_rate*self.del_position
+        self.position -= learning_rate*self.del_position #/ self.cpg
         self.del_position *= 0.
-
+        self.cpg = 1
 
         
 
 class NeuralNetwork(object):
 
-    def __init__(self, input_dim, output_dim):
+    def __init__(self, input_dim, output_dim, hidden_neurons=4, activation_class=tnn.Relu, optimizer=tnn.Adam()):
         self.input_dim = input_dim
         self.output_dim = output_dim
-        
-        self.sensors = [Neuron(position=(0.0,0.5), activation=tnn.Linear()) for _ in range(input_dim)]
-        self.motors = [Neuron(position=(1.0,0.5), activation=tnn.Linear()) for _ in range(output_dim)]
+        self.hidden_neurons = hidden_neurons
+        self.activation = activation_class
+
+        self.sensors = [Neuron(position=(0.0,0.5), activation=tnn.Linear(), optimizer=optimizer) for _ in range(input_dim)]
+        self.motors = [Neuron(position=(1.0,0.5), activation=tnn.Linear(), optimizer=optimizer) for _ in range(output_dim)]
         self.inners = [] ## List of neurons
 
         self.inputs = None
         self.outputs = None
-        self._initialize_connection_()
+        self._initialize_connection_1()
+
+        self.update_count = 0
 
     def _initialize_connection_(self):
         for i in range(self.output_dim):
@@ -100,6 +110,20 @@ class NeuralNetwork(object):
         #     for i in range(len(self.inners)):
         #     self.inners[i]._initialize_connection_(self.sensors)
             
+    def _initialize_connection_1(self):
+        for i in range(self.hidden_neurons):
+            # randy = np.random.uniform()
+            randy = np.random.uniform(0.4,0.6)
+            # randy = 0.
+            inner = Neuron(position=(0.7,randy), activation=self.activation())
+            inner._initialize_connection_(self.sensors)
+            self.inners.append(inner)
+        for i in range(self.output_dim):
+            self.motors[i]._initialize_connection_(self.inners)
+        
+
+        
+
         
 
     def _sort_neurons_by_xposition_(self):
@@ -138,10 +162,26 @@ class NeuralNetwork(object):
         del_inputs = np.array([self.sensors[i].del_outputs for i in range(self.input_dim)]).T
         return del_inputs
 
-    def update(self, learning_rate=0.01):
-        for neuron in self.inners:
-            neuron.update_params(learning_rate)
-            neuron.update_position(learning_rate)
+    def update(self, learning_rate=0.03):
+        # if self.update_count %2 == 0:
+        #     for neuron in self.inners+self.motors:
+        #         neuron.update_params(learning_rate)
+        # else:
+        #     for neuron in self.sensors+self.inners+self.motors:
+        #         neuron.update_position(learning_rate)
+        # self.update_count += 1
 
-        for neuron in self.motors:
+        for neuron in self.inners+self.motors:
             neuron.update_params(learning_rate)
+        for neuron in self.sensors+self.inners+self.motors:
+            neuron.update_position(learning_rate)
+        
+        # for neuron in self.motors+self.inners:
+        #     neuron.update_params(learning_rate)
+
+        self.reposition()
+
+    def reposition(self):
+        # (0.0,0.5)(1.0,0.5)
+        
+        pass
