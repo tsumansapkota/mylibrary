@@ -36,6 +36,32 @@ class SplineManifold1D(object):
         proj = proj_ + point1
         return proj
 
+    # def forward(self, inputs):
+    #     self.inputs = inputs
+    #     self.projection = np.zeros_like(self.inputs)
+    #     self.gradients = np.zeros_like(self.inputs)
+    #     self.range_index = np.zeros(self.inputs.shape[0], dtype=np.int)
+    #     self.errors = np.ones(self.inputs.shape[0])*9999
+    #     for index in range(len(self.X)-1):
+    #         point1 = self.X[index:index+1]
+    #         point2 = self.X[index+1:index+2]
+    #         projection = self._get_projection_(self.inputs, point1, point2)
+    #         self._projtemp = projection
+    #         minv = np.minimum(point1, point2)
+    #         maxv = np.maximum(point1, point2)
+    #         projection = np.clip(projection, minv, maxv)
+            
+    #         gradients = projection - self.inputs
+    #         errors = (gradients**2).mean(axis=1)
+    #         mask = self.errors > errors
+    #         self.projection[mask] = projection[mask]
+    #         self.gradients[mask] = gradients[mask]
+    #         self.range_index[mask] = index
+    #         self.errors[mask] = errors[mask]
+    #         pass
+        
+    #     return self.projection
+
     def forward(self, inputs):
         self.inputs = inputs
         self.projection = np.zeros_like(self.inputs)
@@ -46,15 +72,18 @@ class SplineManifold1D(object):
             point1 = self.X[index:index+1]
             point2 = self.X[index+1:index+2]
             projection = self._get_projection_(self.inputs, point1, point2)
-            # projection = np.clip(projection, point1, point2)
+            self._projtemp = projection
+            minv = np.minimum(point1, point2)
+            maxv = np.maximum(point1, point2)
+            projection = np.clip(projection, minv, maxv)
             
             gradients = projection - self.inputs
             errors = (gradients**2).mean(axis=1)
             mask = self.errors > errors
-            self.projection[mask] = projection
-            self.gradients[mask] = gradients
+            self.projection[mask] = projection[mask]
+            self.gradients[mask] = gradients[mask]
             self.range_index[mask] = index
-            self.errors[mask] = errors
+            self.errors[mask] = errors[mask]
             pass
         
         return self.projection
@@ -91,6 +120,34 @@ class SplineManifold1D(object):
         return
 
     def update(self, learning_rate=0.01):
+        # self._maintain_manifold_()
         self.X -= learning_rate*self.del_X
+
+    def _maintain_manifold_(self):
+        for index in range(1, len(self.X)-1):
+            mask = self.range_index == index-1
+            pm = self.projection[mask]
+            p1 = pm[np.argmin(np.abs(pm-self.X[index])[:,0])]
+
+            mask = self.range_index == index
+            pm = self.projection[mask]
+            p2 = pm[np.argmin(np.abs(pm-self.X[index])[:,0])]
+
+            self.X[index] = (p1+p2)/2            
+
+
+    def add_point(self):
+        ## find range with largest gradient
+        max_err_indx = None
+        max_err = 0
+        for index in range(len(self.X)-1):
+            mask = self.range_index == index
+            err = np.mean(self.errors[mask])
+            if err > max_err:
+                max_err = err
+                max_err_indx = index
+            pass
+        self.X = np.insert(self.X, max_err_indx+1, (self.X[max_err_indx]+self.X[max_err_indx+1])/2, axis=0)
+
 
         
