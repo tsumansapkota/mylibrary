@@ -73,6 +73,19 @@ class SplineManifold1D(object):
             point2 = self.X[index+1:index+2]
             projection = self._get_projection_(self.inputs, point1, point2)
             self._projtemp = projection
+            scaler = self._get_gradient_scaler_(projection, point1, point2)
+
+            ### selecting and clipping seems similar
+            ## this is selecting based approach
+            # if len(self.X) > 2:
+            #     if index > 0: ## points below the point1
+            #         mask = scaler[:,0]>1
+            #         projection[mask] = point1
+            #     if index < len(self.X)-2: ## points above the point2 
+            #         mask = scaler[:,0]<0
+            #         projection[mask] = point2
+
+            ## this is clipping based approach
             minv = np.minimum(point1, point2)
             maxv = np.maximum(point1, point2)
             projection = np.clip(projection, minv, maxv)

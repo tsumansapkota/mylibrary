@@ -658,81 +658,6 @@ class NonLinearLayer(LinearLayer):
         super().update()
 
 
-class NonLinearLayer_(Layer):  # this class is depricated! will be removed in future versions
-    """
-        Linear Layer class
-        Z = X . W           ; X -> R(num_samples , input_dim)
-                            ; W -> R(input_dim , output_dim)
-        Y = actv(Z)
-
-        given: dE/dY  (AKA dY)      ; R(num_samples, output_dim)
-        dE/dZ = dY * actv'(Z)       ; ''''''''''''''''''''''''''
-        dE/dW = dE/dZ . dZ/dW
-        .: dW = X.T . dZ    ; R(input_dim, output_dim)
-        .: dX = dZ . W.T      ; R(num_samples, input_dim)
-        """
-
-    def __init__(self, input_dim, output_dim, activation=None, weights=None, bias=None, optimizer=SGD()):
-        if weights is None:
-            # self.weights = np.random.randn(input_dim, output_dim) * 2 / (input_dim + output_dim)
-            # self.weights = (np.random.randn(input_dim, output_dim) * 0.2) - 0.1
-            self.weights = np.random.randn(input_dim, output_dim) * np.sqrt(2. / input_dim)  # Xavier/He initialization
-        else:
-            self.weights = weights
-
-        if bias is None:
-            self.bias = np.zeros(output_dim)
-        else:
-            self.bias = bias
-
-        if activation is None:
-            activation = Linear()
-        layerList.pop(len(layerList) - 1)  # removing the activation(last ones) as a seperate layer
-
-        self.weightsOpt = optimizer.set_parameter(self.weights)
-        self.biasOpt = optimizer.set_parameter(self.bias)
-
-        self.activation = activation
-        self.input = None
-        self.zee = None
-        self.output = None
-
-        self.del_weights = None
-        self.del_bias = None
-        self.del_output = None
-        self.del_zee = None
-
-        layerList.append(self)
-        pass
-
-    def forward(self, input):
-        self.input = input
-        # self.zee = input.dot(self.weights) + self.bias
-        self.zee = input @ self.weights + self.bias  # @ == .dot
-        self.output = self.activation.forward(self.zee)
-        return self.output
-
-    def backward(self, output_delta):
-        self.del_output = output_delta
-        self.del_zee = self.activation.backward(output_delta)
-        m = output_delta.shape[0]
-        self.del_bias = np.mean(self.del_zee, axis=0)  # * 1 / m
-        self.del_weights = self.input.T.dot(self.del_zee) * 1 / m
-        # return self.del_output.dot(self.weights.T)
-        return self.del_zee.dot(self.weights.T)
-
-    def update(self):
-        self.activation.update()
-        gradients = self.weightsOpt.compute_gradient(self.del_weights)
-        # print(self.weights)
-        # print(gradients)
-        # print(gradients.shape)
-        self.weights -= gradients  # * learning_rate
-        # print(self.bias.shape, self.del_bias.shape)
-        gradients = self.biasOpt.compute_gradient(self.del_bias)
-        self.bias -= gradients  # * learning_rate
-
-
 class WeightsLayer(Layer):
 
     def __init__(self, input_dim, output_dim, weights=None, optimizer=SGD()):
@@ -804,6 +729,39 @@ class BiasLayer(Layer):
         self.bias -= gradients  # * learning_rate
 
 
+class Multiplier(Layer):
+
+    def __init__(self, io_dim, multiplier=None, optimizer=SGD()):
+        if multiplier is None:
+            self.multiplier = np.ones(io_dim)
+        else:
+            self.multiplier = multiplier
+
+        self.multiplierOpt = optimizer.set_parameter(self.multiplier)
+
+        self.input = None
+        self.output = None
+
+        self.del_multiplier = None
+        self.del_output = None
+
+        layerList.append(self)
+        pass
+
+    def forward(self, input):
+        self.input = input
+        self.output = self.input * self.multiplier 
+        return self.output
+
+    def backward(self, output_delta):
+        self.del_output = output_delta
+        self.del_bias = np.mean(self.del_output*self.input, axis=0)
+        return self.del_output*self.multiplier
+
+    def update(self):
+        gradients = self.multiplierOpt.compute_gradient(self.del_multiplier)
+        self.multiplier -= gradients  
+
 ##############################################################
 ##############################################################
 
@@ -871,99 +829,3 @@ class AutoForm(Layer):
     def update(self):
         for layer in self.layerList:
             layer.update()
-
-# class LinearLayer(object):
-#     """
-#     Linear Layer class
-#     Y = X . W           ; X -> R(num_samples , input_dim)
-#                         ; W -> R(input_dim , output_dim)
-#     given: dE/dY        ; R(num_samples, output_dim)
-#     dE/dW = dE/dY . dY/dW
-#     .: dW = X.T . dY    ; R(input_dim, output_dim)
-#     .: dX = dY . W.T      ; R(num_samples, input_dim)
-#     """
-#
-#     def __init__(self, input_dim, output_dim):
-#         # self.weights = np.random.randn(input_dim, output_dim) * 2 / (input_dim + output_dim)
-#         self.weights = (np.random.randn(input_dim, output_dim) * 0.2) - 0.1
-#         self.bias = np.zeros(output_dim)
-#
-#         self.input = None
-#         self.output = None
-#         self.del_weights = None
-#         self.del_bias = None
-#         self.del_output = None
-#         pass
-#
-#     def forward(self, input):
-#         self.input = input
-#         self.output = input.dot(self.weights) + self.bias
-#         return self.output
-#
-#     def backward(self, output_delta):
-#         self.del_output = output_delta
-#         self.del_bias = np.mean(self.del_output, axis=0)
-#         self.del_weights = self.input.T.dot(self.del_output)
-#         return self.del_output.dot(self.weights.T)
-#
-#     def update(self, learning_rate=0.1):
-#         self.weights -= self.del_weights * learning_rate
-#         self.bias -= self.del_bias * learning_rate
-
-
-
-
-# class LinearLayerNoBias(Layer):
-#     """
-#         Linear Layer class
-#         Z = X . W           ; X -> R(num_samples , input_dim)
-#                             ; W -> R(input_dim , output_dim)
-#         Y = actv(Z)
-#
-#         given: dE/dY  (AKA dY)      ; R(num_samples, output_dim)
-#         dE/dZ = dY * actv'(Z)       ; ''''''''''''''''''''''''''
-#         dE/dW = dE/dZ . dZ/dW
-#         .: dW = X.T . dZ    ; R(input_dim, output_dim)
-#         .: dX = dZ . W.T      ; R(num_samples, input_dim)
-#         """
-#
-#     def __init__(self, input_dim, output_dim, activation=Linear(), weights=None, optimizer=SGD()):
-#         if weights is None:
-#             # self.weights = np.random.randn(input_dim, output_dim) * 2 / (input_dim + output_dim)
-#             # self.weights = (np.random.randn(input_dim, output_dim) * 0.2) - 0.1
-#             self.weights = np.random.randn(input_dim, output_dim) * np.sqrt(2. / input_dim)  # Xavier/He initialization
-#         else:
-#             self.weights = weights
-#
-#         self.weightsOpt = optimizer.set_parameter(self.weights)
-#
-#         self.activation = activation
-#         self.input = None
-#         self.zee = None
-#         self.output = None
-#
-#         self.del_weights = None
-#         self.del_output = None
-#         self.del_zee = None
-#
-#         layerList.append(self)
-#         pass
-#
-#     def forward(self, input):
-#         self.input = input
-#         # self.zee = input.dot(self.weights) + self.bias
-#         self.zee = input @ self.weights  # @ == .dot
-#         self.output = self.activation.forward(self.zee)
-#         return self.output
-#
-#     def backward(self, output_delta):
-#         self.del_output = output_delta
-#         self.del_zee = self.del_output * self.activation.backward()
-#         m = output_delta.shape[0]
-#         self.del_weights = self.input.T.dot(self.del_zee) * 1 / m
-#         # return self.del_output.dot(self.weights.T)
-#         return self.del_zee.dot(self.weights.T)
-#
-#     def update(self):
-#         gradients = self.weightsOpt.compute_gradient(self.del_weights)
-#         self.weights -= gradients  # * learning_rate
