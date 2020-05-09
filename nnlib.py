@@ -733,7 +733,7 @@ class Multiplier(Layer):
 
     def __init__(self, io_dim, multiplier=None, optimizer=SGD()):
         if multiplier is None:
-            self.multiplier = np.ones(io_dim)
+            self.multiplier = np.ones([1, io_dim])
         else:
             self.multiplier = multiplier
 
@@ -755,12 +755,131 @@ class Multiplier(Layer):
 
     def backward(self, output_delta):
         self.del_output = output_delta
-        self.del_bias = np.mean(self.del_output*self.input, axis=0)
+        self.del_multiplier = np.mean(self.del_output*self.input, axis=0)
         return self.del_output*self.multiplier
 
     def update(self):
         gradients = self.multiplierOpt.compute_gradient(self.del_multiplier)
         self.multiplier -= gradients  
+
+
+    
+class BatchNormalization(Layer):
+
+    def __init__(self, io_dim, multiplier=None, adder=None, beta=0.9, epsilon=1e-8, optimizer=SGD()):
+
+        if multiplier is None:
+            self.multiplier = Multiplier(io_dim, optimizer=optimizer)
+        elif isinstance(multiplier, np.ndarray):
+            self.multiplier = Multiplier(io_dim, multiplier, optimizer)
+        else:### This takes Multiplier Layer
+            self.multiplier = multiplier
+
+        if adder is None:
+            self.adder = BiasLayer(io_dim, optimizer=optimizer)
+        elif isinstance(adder, np.ndarray):
+            self.adder = BiasLayer(io_dim, adder, optimizer)
+        else:### This takes Bias Layer
+            self.adder = adder
+
+        self.beta = beta
+
+        self.input = None
+        self.output = None
+        self.del_output = None
+
+        self.moving_mean = 0
+        self.moving_var = 0
+        self.count = 1
+
+        self.mean = None
+        self.std_inv = None
+        self.epsilon = epsilon
+        self.x_norm = None
+
+        self.training = True
+
+        layerList.append(self)
+
+
+    def forward(self, input):
+        self.input = input
+        if self.training:
+            mean = self.input.mean(axis=0)
+            x_mean = self.input-mean
+            var = (x_mean**2).mean(axis=0)
+
+            ### Save running averages
+            self.moving_mean = self.beta*self.moving_mean + (1-self.beta)*mean
+            self.moving_var = self.beta*self.moving_var + (1-self.beta)*var
+            ### bias correction
+            correction = (1 - self.beta ** self.count)
+            self.moving_mean /= correction
+            self.moving_var /= correction
+            self.count +=1
+        else:
+            mean, var = self.moving_mean, self.moving_var
+            x_mean = self.input-mean
+        
+        self.mean = mean
+        self.var = var
+        self.x_mean = x_mean
+        self.std_inv = 1./np.sqrt(var+self.epsilon)
+
+        self.x_norm = self.x_mean*self.std_inv
+        self.output = self.adder.forward(self.multiplier.forward(self.x_norm))
+        return self.output
+        # if self.training:
+        #     self.input = input
+        #     self.mean = np.mean(input, axis=0)
+        #     self.var = np.var(input, axis=0)
+
+        # self.x_norm = (input - self.mean) / np.sqrt(self.var + self.epsilon)
+        # out = self.adder.forward(self.multiplier.forward(self.x_norm))
+        # return out
+
+    def backward(self, del_output):
+        # self.del_output = del_output
+        # m = self.del_output.shape[0]
+        # del_normal = self.multiplier.backward(self.adder.backward(del_output))
+        
+        # del_var = (-0.5/(self.sqrt_var**3))*np.sum(del_normal*self.x_mean, axis=0)
+        # del_mean = -1*np.sum(del_normal/self.sqrt_var) + del_var*np.mean(-2*self.x_mean)
+        # # del_var /= m
+        # # del_mean /= m
+        # self.multiplier.del_multiplier *= m
+        # self.adder.del_bias *=m
+
+        # del_input = del_normal/self.sqrt_var + del_var*2*self.x_mean + del_mean 
+        # return del_input
+        self.del_output = del_output
+        N = self.del_output.shape[0]
+
+        del_x_norm = self.multiplier.backward(self.adder.backward(del_output))
+        # self.multiplier.del_multiplier *= N
+        # self.adder.del_bias *= N
+
+        self.del_var = np.sum(del_x_norm * self.x_mean, axis=0) * -.5 * self.std_inv**3
+        self.del_mean = np.sum(del_x_norm * - self.std_inv, axis=0) + \
+            self.del_var * np.mean(-2. * self.x_mean, axis=0)
+
+        del_input = (del_x_norm * self.std_inv) + (self.del_var * 2 * self.x_mean / N) + (self.del_mean / N)
+        # self.dmult = np.sum(del_output * self.x_norm, axis=0)
+        # self.dadd = np.sum(del_output, axis=0)
+        return del_input
+        
+
+    def update(self):
+        self.multiplier.update()
+        self.adder.update()
+
+        
+            
+
+        
+
+
+
 
 ##############################################################
 ##############################################################
