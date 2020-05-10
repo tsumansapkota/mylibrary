@@ -772,15 +772,17 @@ class BatchNormalization(Layer):
             self.multiplier = Multiplier(io_dim, optimizer=optimizer)
         elif isinstance(multiplier, np.ndarray):
             self.multiplier = Multiplier(io_dim, multiplier, optimizer)
-        else:### This takes Multiplier Layer
-            self.multiplier = multiplier
+        else:
+            raise ValueError("The multiplier is not None or numpy.ndarray")
+        layerList.pop(len(layerList) - 1) ### remove multiplier
 
         if adder is None:
             self.adder = BiasLayer(io_dim, optimizer=optimizer)
         elif isinstance(adder, np.ndarray):
             self.adder = BiasLayer(io_dim, adder, optimizer)
         else:### This takes Bias Layer
-            self.adder = adder
+            raise ValueError("The adder is not None or numpy.ndarray")
+        layerList.pop(len(layerList) - 1) ### remove adder
 
         self.beta = beta
 
@@ -820,6 +822,12 @@ class BatchNormalization(Layer):
         else:
             mean, var = self.moving_mean, self.moving_var
             x_mean = self.input-mean
+
+        # print("========================")
+        # print(mean, var)
+        # print("------------------------")
+        # print(self.moving_mean, self.moving_var)
+        # print("========================")
         
         self.mean = mean
         self.var = var
@@ -873,7 +881,330 @@ class BatchNormalization(Layer):
         self.multiplier.update()
         self.adder.update()
 
+
+class BatchNormalization1(Layer):
+
+    def __init__(self, io_dim, adder=None, beta=0.9, epsilon=1e-8, optimizer=SGD()):
+
+        if adder is None:
+            self.adder = BiasLayer(io_dim, optimizer=optimizer)
+        elif isinstance(adder, np.ndarray):
+            self.adder = BiasLayer(io_dim, adder, optimizer)
+        else:### This takes Bias Layer
+            raise ValueError("The adder is not None or numpy.ndarray")
+        layerList.pop(len(layerList) - 1) ### remove adder
+
+        self.beta = beta
+
+        self.input = None
+        self.output = None
+        self.del_output = None
+
+        self.moving_mean = 0
+        self.moving_var = 0
+
+        self.mean = None
+        self.std_inv = None
+        self.epsilon = epsilon
+        self.x_norm = None
+
+        self.training = True
+
+        layerList.append(self)
+
+
+    def forward(self, input):
+        self.input = input
+        if self.training:
+            mean = self.input.mean(axis=0)
+            x_mean = self.input-mean
+            var = (x_mean**2).mean(axis=0)
+            ### Save running averages
+            self.moving_mean = self.beta*self.moving_mean + (1-self.beta)*mean
+            self.moving_var = self.beta*self.moving_var + (1-self.beta)*var
+        else:
+            mean, var = self.moving_mean, self.moving_var
+            x_mean = self.input-mean
+
+        self.mean = mean
+        self.var = var
+        self.x_mean = x_mean
+        self.std_inv = 1./np.sqrt(var+self.epsilon)
+
+        self.x_norm = self.x_mean*self.std_inv
+        self.output = self.adder.forward(self.x_norm)
+        return self.output
+
+    def backward(self, del_output):
+        self.del_output = del_output
+        N = self.del_output.shape[0]
+
+        del_x_norm = self.adder.backward(del_output)
+
+        self.del_var = np.sum(del_x_norm * self.x_mean, axis=0) * -.5 * self.std_inv**3
+        self.del_mean = np.sum(del_x_norm * - self.std_inv, axis=0) + \
+            self.del_var * np.mean(-2. * self.x_mean, axis=0)
+
+        del_input = (del_x_norm * self.std_inv) + (self.del_var * 2 * self.x_mean / N) + (self.del_mean / N)
+        return del_input
+
+    def update(self):
+        self.adder.update()
+        pass
+
+
+class TBatchNorm2(Layer):
+
+    def __init__(self, io_dim, multiplier=None, adder=None, beta=0.9, epsilon=1e-8, optimizer=SGD()):
+
+        if multiplier is None:
+            self.multiplier = Multiplier(io_dim, optimizer=optimizer)
+        elif isinstance(multiplier, np.ndarray):
+            self.multiplier = Multiplier(io_dim, multiplier, optimizer)
+        else:
+            raise ValueError("The multiplier is not None or numpy.ndarray")
+        layerList.pop(len(layerList) - 1) ### remove multiplier
+
+        if adder is None:
+            self.adder = BiasLayer(io_dim, optimizer=optimizer)
+        elif isinstance(adder, np.ndarray):
+            self.adder = BiasLayer(io_dim, adder, optimizer)
+        else:### This takes Bias Layer
+            raise ValueError("The adder is not None or numpy.ndarray")
+        layerList.pop(len(layerList) - 1) ### remove adder
+
+        self.beta = beta
+
+        self.input = None
+        self.output = None
+        self.del_output = None
+
+        self.moving_mean = 0
+        self.moving_var = 0
+        self.count = 1
+
+        self.mean = None
+        self.std_inv = None
+        self.epsilon = epsilon
+        self.x_norm = None
+
+        self.training = True
+
+        self.temp = 0
+
+        layerList.append(self)
+
+
+    def forward(self, input):
+        self.input = input
+        if self.training:
+            mean = self.input.mean(axis=0)
+            var = self.input.var(axis=0)
+
+            ### Save running averages
+            self.moving_mean = self.beta*self.moving_mean + (1-self.beta)*mean
+            self.moving_var = self.beta*self.moving_var + (1-self.beta)*var
+            self.count += 1
+
+        correction = (1 - self.beta ** self.count)
+        mean = self.moving_mean/correction
+        var = self.moving_var/correction
         
+
+        self.temp = (1-self.beta)/correction
+
+        self.mean = mean
+        self.var = var
+        
+        self.x_mean = self.input-mean
+        self.std_inv = 1./np.sqrt(self.var+self.epsilon)
+
+        self.x_norm = self.x_mean*self.std_inv
+        self.output = self.adder.forward(self.multiplier.forward(self.x_norm))
+        return self.output
+
+    def backward(self, del_output):
+        self.del_output = del_output
+        N = self.del_output.shape[0]
+
+        del_x_norm = self.multiplier.backward(self.adder.backward(del_output))
+
+        self.del_var = np.sum(del_x_norm * self.x_mean, axis=0) * -.5 * self.std_inv**3
+        self.del_var *= self.temp
+        self.del_mean = np.sum(del_x_norm * - self.std_inv, axis=0) + \
+            self.del_var * np.mean(-2. * self.x_mean, axis=0)
+        self.del_mean *= self.temp
+
+        del_input = (del_x_norm * self.std_inv) + (self.del_var * 2 * self.x_mean / N) + (self.del_mean / N)
+        return del_input
+        
+
+    def update(self):
+        self.multiplier.update()
+        self.adder.update()
+
+
+class TBatchNorm1(Layer):
+
+    def __init__(self, io_dim, multiplier=None, adder=None, beta=0.9, epsilon=1e-8, optimizer=SGD()):
+
+        if multiplier is None:
+            self.multiplier = Multiplier(io_dim, optimizer=optimizer)
+        elif isinstance(multiplier, np.ndarray):
+            self.multiplier = Multiplier(io_dim, multiplier, optimizer)
+        else:
+            raise ValueError("The multiplier is not None or numpy.ndarray")
+        layerList.pop(len(layerList) - 1) ### remove multiplier
+
+        if adder is None:
+            self.adder = BiasLayer(io_dim, optimizer=optimizer)
+        elif isinstance(adder, np.ndarray):
+            self.adder = BiasLayer(io_dim, adder, optimizer)
+        else:### This takes Bias Layer
+            raise ValueError("The adder is not None or numpy.ndarray")
+        layerList.pop(len(layerList) - 1) ### remove adder
+
+        self.beta = beta
+
+        self.input = None
+        self.output = None
+        self.del_output = None
+
+        self.moving_mean = 0
+        self.moving_var = 0
+
+        self.mean = None
+        self.std_inv = None
+        self.epsilon = epsilon
+        self.x_norm = None
+        self.count = 1
+
+        self.training = True
+
+        layerList.append(self)
+
+
+    def forward(self, input):
+        self.input = input
+        if self.training:
+            mean = self.input.mean(axis=0)
+            x_mean = self.input-mean
+            var = (x_mean**2).mean(axis=0)
+
+            ### Save running averages
+            self.moving_mean = self.beta*self.moving_mean + (1-self.beta)*mean
+            self.moving_var = self.beta*self.moving_var + (1-self.beta)*var
+            self.count += 1
+        else:
+            correction = (1 - self.beta ** self.count)
+            mean = self.moving_mean/correction
+            var = self.moving_var/correction
+            x_mean = self.input-mean
+
+        self.mean = mean
+        self.var = var
+        self.x_mean = x_mean
+        self.std_inv = 1./np.sqrt(var+self.epsilon)
+
+        self.x_norm = self.x_mean*self.std_inv
+        # self.output = self.adder.forward(self.multiplier.forward(self.x_norm))
+        self.output = self.multiplier.forward(self.adder.forward(self.x_norm))
+        return self.output
+
+    def backward(self, del_output):
+        self.del_output = del_output
+        N = self.del_output.shape[0]
+
+        # del_x_norm = self.multiplier.backward(self.adder.backward(del_output))
+        del_x_norm = self.adder.backward(self.multiplier.backward(del_output))
+        del_x_mean = del_x_norm*self.std_inv
+        del_input = del_x_mean
+        return del_input
+        
+
+    def update(self):
+        self.multiplier.update()
+        self.adder.update()
+
+
+class TBatchNorm(Layer):
+
+    def __init__(self, io_dim, multiplier=None, adder=None, beta=0.9, epsilon=1e-8, optimizer=SGD()):
+
+        if multiplier is None:
+            self.multiplier = Multiplier(io_dim, optimizer=optimizer)
+        elif isinstance(multiplier, np.ndarray):
+            self.multiplier = Multiplier(io_dim, multiplier, optimizer)
+        else:
+            raise ValueError("The multiplier is not None or numpy.ndarray")
+        layerList.pop(len(layerList) - 1) ### remove multiplier
+
+        if adder is None:
+            self.adder = BiasLayer(io_dim, optimizer=optimizer)
+        elif isinstance(adder, np.ndarray):
+            self.adder = BiasLayer(io_dim, adder, optimizer)
+        else:### This takes Bias Layer
+            raise ValueError("The adder is not None or numpy.ndarray")
+        layerList.pop(len(layerList) - 1) ### remove adder
+
+        self.beta = beta
+
+        self.input = None
+        self.output = None
+        self.del_output = None
+
+        self.count = 1
+
+        self.mean = 0
+        self.stdi = 0
+        self.var = 0
+        self.running_mean = 0
+        self.running_var = 0
+        self.epsilon = epsilon
+        self.x_norm = None
+
+        self.training = True
+
+        layerList.append(self)
+
+
+    def forward(self, input):
+        self.input = input
+        if self.training:
+            mean = self.input.mean(axis=0)
+            # stdi = 1./self.input.std(axis=0)
+            var = self.input.var(axis=0)
+
+            ### Save running averages
+            self.running_mean = self.beta*self.running_mean + (1-self.beta)*mean
+            # self.stdi = self.beta*self.stdi + (1-self.beta)*stdi
+            self.running_var = self.beta*self.running_var + (1-self.beta)*var
+            self.count +=1
+            
+        correction = (1 - self.beta ** self.count)
+        self.mean = self.running_mean/correction
+        self.var = self.running_var/correction
+
+        self.stdi = 1./np.sqrt(self.var + self.epsilon)
+        self.x_mean = self.input-self.mean
+        self.x_norm = self.x_mean*self.stdi
+        self.output = self.multiplier.forward(self.adder.forward(self.x_norm))
+        return self.output
+
+    def backward(self, del_output):
+        self.del_output = del_output
+        N = self.del_output.shape[0]
+
+        del_x_norm = self.adder.backward(self.multiplier.backward(del_output))
+        del_x_mean = del_x_norm*self.stdi
+        del_input = del_x_mean
+        return del_input
+        
+
+    def update(self):
+        self.multiplier.update()
+        self.adder.update()
+
             
 
         
