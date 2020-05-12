@@ -317,12 +317,12 @@ class SGD(Optimizer):
 
     def __init__(self, learning_rate=0.01):
         self.learning_rate = learning_rate
-        self.parameter_list = []
+        # self.parameter_list = []
         pass
 
     def set_parameter(self, parameters):
         parameter = self.Parameter(self, parameters)
-        self.parameter_list.append(parameter)
+        # self.parameter_list.append(parameter)
         return parameter
 
     def compute_gradient(self, var, grad):
@@ -343,7 +343,7 @@ class Momentum(Optimizer):
     def __init__(self, learning_rate=0.01, beta1=0.9):
         self.learning_rate = learning_rate
         self.beta = beta1
-        self.parameter_list = []
+        # self.parameter_list = []
 
     def set_parameter(self, parameters):
         """
@@ -351,7 +351,7 @@ class Momentum(Optimizer):
         :return: return parameter pointer
         """
         parameter = self.Parameter(self, parameters)
-        self.parameter_list.append(parameter)
+        # self.parameter_list.append(parameter)
         return parameter
 
     def compute_gradient(self, var, grad):
@@ -374,7 +374,7 @@ class RMSProp(Optimizer):
         self.learning_rate = learning_rate
         self.beta = beta2
         self.epsilon = epsilon
-        self.parameter_list = []
+        # self.parameter_list = []
 
     def set_parameter(self, parameters):
         """
@@ -382,7 +382,7 @@ class RMSProp(Optimizer):
         :return: return parameter pointer
         """
         parameter = self.Parameter(self, parameters)
-        self.parameter_list.append(parameter)
+        # self.parameter_list.append(parameter)
         return parameter
 
     def compute_gradient(self, var, grad):
@@ -408,7 +408,7 @@ class Adam(Optimizer):  # rmsprop + momentum
         self.beta1 = beta1
         self.beta2 = beta2
         self.epsilon = epsilon
-        self.parameter_list = []
+        # self.parameter_list = []
 
     def set_parameter(self, parameters):
         """
@@ -416,7 +416,7 @@ class Adam(Optimizer):  # rmsprop + momentum
         :return: return parameter pointer
         """
         parameter = self.Parameter(self, parameters)
-        self.parameter_list.append(parameter)
+        # self.parameter_list.append(parameter)
         return parameter
 
     def compute_gradient(self, var, grad):
