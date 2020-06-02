@@ -37,6 +37,19 @@ class CrossEntropyBinary(LossFunction):
         return -((target * np.log(output) + (1 - target) * np.log(1 - output)).sum(axis=1)).mean()
 
     @staticmethod
+    def del_loss(output, target, epsilon=1e-11):
+        output = output.clip(epsilon, 1 - epsilon)
+        return (output - target)/(output(1-output))
+
+class SigmoidCrossEntropyBinary(LossFunction):
+    @staticmethod
+    def loss(output, target, epsilon=1e-11):
+        output = 1 / (1 + np.exp(-output))
+        output = output.clip(epsilon, 1 - epsilon)
+        # return -np.mean(np.sum(target * np.log(output) + (1 - target) * np.log(1 - output), axis=1))
+        return -((target * np.log(output) + (1 - target) * np.log(1 - output)).sum(axis=1)).mean()
+
+    @staticmethod
     def del_loss(output, target):
         return output - target
 
