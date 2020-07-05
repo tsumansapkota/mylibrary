@@ -39,18 +39,19 @@ class CrossEntropyBinary(LossFunction):
     @staticmethod
     def del_loss(output, target, epsilon=1e-11):
         output = output.clip(epsilon, 1 - epsilon)
-        return (output - target)/(output(1-output))
+        return (output - target)/(output*(1-output))
 
 class SigmoidCrossEntropyBinary(LossFunction):
     @staticmethod
     def loss(output, target, epsilon=1e-11):
-        output = 1 / (1 + np.exp(-output))
+        output = 1 / (1 + np.exp(-output)) ## sigmoid
         output = output.clip(epsilon, 1 - epsilon)
         # return -np.mean(np.sum(target * np.log(output) + (1 - target) * np.log(1 - output), axis=1))
         return -((target * np.log(output) + (1 - target) * np.log(1 - output)).sum(axis=1)).mean()
 
     @staticmethod
     def del_loss(output, target):
+        output = 1 / (1 + np.exp(-output)) ## sigmoid
         return output - target
 
 
@@ -73,8 +74,8 @@ class SoftmaxCrossEntropy(LossFunction):
         # output = np.clip(output, epsilon, 1 - epsilon)
         output = output.clip(epsilon, 1 - epsilon)
         # divisor = np.maximum(output * (1 - output), epsilon)
-        divisor = 1.
-        return (output - target) / divisor
+#         divisor = 1.
+        return (output - target)# / divisor
 
 
 class CrossEntropyLoss(LossFunction):
@@ -152,6 +153,7 @@ class Sigmoid(Layer):
         self.del_output = None
 
     def forward(self, x):
+        x = np.clip(x, -200, 200)
         self.out = 1 / (1 + np.exp(-x))
         return self.out
 
