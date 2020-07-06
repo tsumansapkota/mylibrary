@@ -10,20 +10,39 @@ except ImportError:
 class Relu_1Linear(tnn.Layer):
     def __init__(self):
         tnn.layerList.append(self)
-        self.x = None
+        self.input = None
         self.mask = None
         self.del_output = None
+        self.output = None
 
 
     def forward(self, x):
-        self.x = x
-        self.mask = ((self.x >= 0).astype(float))
+        self.input = x
+        self.mask = ((x >= 0).astype(float))
         self.mask[:, 0] = self.mask[:, 0]*0 + 1.
-        return self.x*self.mask
+        self.output = x*self.mask
+        return self.output
 
     def backward(self, output_delta):
         self.del_output = output_delta
-        return self.mask * output_delta    
+        return self.mask * output_delta
+
+class Linear(tnn.Layer):
+
+    def __init__(self):
+        tnn.layerList.append(self)
+        self.input = None
+        self.output = None
+        self.del_output = None
+
+    def forward(self, x):
+        self.input = x
+        self.output = x
+        return x
+
+    def backward(self, output_delta):
+        self.del_output = output_delta
+        return output_delta    
 
 
 class DynamicNN_Relu:
@@ -72,7 +91,7 @@ class DynamicNN_Relu:
             res1.weights *= 0.
             relu = Relu_1Linear()
             if i == len(self.layers_dim)-2:
-                relu = tnn.Linear()
+                relu = Linear()
             self.layers.append(layer)
             self.relus.append(relu)
             self.residuals_0.append(res0)
@@ -206,7 +225,7 @@ class DynamicNN_Relu:
         for i in range(len(self.layers)):
             h = self.residuals_0[i].weights.shape[1]
             io = self.layers[i].weights.shape
-            if h > np.min(io): #+1:
+            if h > np.min(io) +1:
                 self.removable_layers.append(i)
             else:
                 self.trainable_layers.append(i)
@@ -306,6 +325,95 @@ class DynamicNN_Relu:
     def compute_neuron_significance(self, dataX, batch_size=None):
         assert len(self.layers) == len(self.residuals_0)
         
+        sum_importance = [0]*(len(self.layers))
+        count_non_zero = [0]*(len(self.layers))
+        
+        sum_importance_res = [0]*(len(self.residuals_0))
+        count_non_zero_res = [0]*(len(self.residuals_0))
+
+        data_size = len(dataX)
+
+        ## do computation on batch wise manner
+        if batch_size is None:
+            batch_size = data_size
+        start = np.arange(0, data_size, batch_size)
+        stop = start+batch_size
+        if stop[-1]>data_size:
+            stop[-1] = data_size
+
+        ### Compute average over the batch
+        for idx in range(len(start)):
+            activations = dataX[start[idx]:stop[idx]]
+            for i in range(len(self.layers)):
+                out0 = self.layers[i].forward(activations)
+                h0 = self.residuals_0[i].forward(activations)
+                h1 = self.residuals_1[i].forward(h0)
+                activations = self.relus[i].forward(out0+h1)
+
+                count_actv = (activations > 0).astype(float).sum(axis=0, keepdims=True)
+                count_non_zero[i] += count_actv
+                count_actv_res = (h0 > 0).astype(float).sum(axis=0, keepdims=True)
+                count_non_zero_res[i] += count_actv_res
+
+            
+            del_output = np.ones_like(activations)
+            for i in reversed(range(len(self.layers))):
+                del_output = self.relus[i].backward(del_output)
+                del_input0 = self.layers[i].backward(del_output)
+                del_h0 = self.residuals_1[i].backward(del_output)
+                del_input1 = self.residuals_0[i].backward(del_h0)
+
+                sum_imp_i = np.abs(self.relus[i].output * self.relus[i].del_output).sum(axis=0)
+                sum_importance[i] += sum_imp_i
+
+                sum_imp_res_i = np.abs(self.residuals_0[i].output*self.residuals_0[i].del_output).sum(axis=0)
+                sum_importance_res[i] += sum_imp_res_i
+                
+                del_output = del_input0 + del_input1
+            
+        ## After data is collected for full batch.
+        for i in range(len(count_non_zero)):
+            sum_importance[i] /= data_size
+            count_non_zero[i] /= data_size
+            sum_importance_res[i] /= data_size
+            count_non_zero_res[i] /= data_size
+        
+        prob_non_zero = count_non_zero
+        prob_non_zero_res = count_non_zero_res
+
+        ### Rescale the significance based upon probability of non_zero
+        ### Always firing neurons should have 0 importance
+        significance = []
+        significance_res = []
+            
+        for i in range(len(self.layers)):
+
+            ## This is parabolic curve with value: zero at 0, 1 and  one at 0.5 (scaled by 4)
+            sig_i = sum_importance[i] * (1 - prob_non_zero[i]) * 4 
+            ## This is skewed parabolic curve with zero value at 0, 1 
+            ## The skewness towards 0 or 1 is given by power <1 or >1 respectively.
+            # sig_i = sum_importance[i] * (1 - prob_non_zero[i]**20) 
+
+            sig_res_i = sum_importance_res[i] * (1 - prob_non_zero_res[i]) * 4
+            ### the significance of the linear part should be high 
+            ### (cannot be deleted to be on safe side)
+            # sig_res_i[0,0] = 1.
+            # sig_res_i[0,0] = sum_importance_res[i]
+            sig_res_i[0,0] = 9e9
+
+            significance.append(sig_i)
+            significance_res.append(sig_res_i)
+            
+        del significance[-1]
+        del prob_non_zero[-1]
+
+        self.significance = significance
+        self.significance_res = significance_res
+
+        
+    def compute_neuron_significance_backup0(self, dataX, batch_size=None):
+        assert len(self.layers) == len(self.residuals_0)
+        
         # sum_activation = [0]*(len(self.layers))
         count_non_zero = [0]*(len(self.layers))
         std_zee = [0]*(len(self.layers))
@@ -338,7 +446,7 @@ class DynamicNN_Relu:
                 if i == len(self.layers)-1:
                     std_z = activations.std(axis=0, keepdims=True)
                 else:
-                    std_z = self.relus[i].x.std(axis=0, keepdims=True)
+                    std_z = self.relus[i].input.std(axis=0, keepdims=True)
                 count_actv = (activations > 0).astype(float).sum(axis=0, keepdims=True)
                 # sum_activation[i] += sum_actv
                 count_non_zero[i] += count_actv
@@ -387,7 +495,6 @@ class DynamicNN_Relu:
             sig_ = sig_lin + sig_res0 ### significance is gathered from linear and residual
     #         sig = sig * mean_activation[i-1].reshape(1,-1)
             sig = sig_ * prob_non_zero[i-1]
-
 
             significance.append(sig_)
             significance_res.append(sig_res1_)
@@ -477,25 +584,37 @@ class DynamicNN_Relu:
         # return dec_neurons, dec_neurons_res
 
     
-    def _set_neuron_decay_rate_(self, steps=500):
+    def _set_neuron_decay_rate_(self, steps=500, epsilon=1e-4):
         self.neuron_decay_rate = {}
         self.neuron_decay_rate2 = {}
         self.neuron_res_decay_rate = {}
         self.neuron_decay_steps = steps
         for li, neurons in self.decay.items():
-            self.neuron_decay_rate[li] = self.layers[li+1].weights[neurons]/steps
-            self.neuron_decay_rate2[li] = self.residuals_0[li+1].weights[neurons]/steps
+            self.neuron_decay_rate[li] = self.layers[li+1].weights[neurons]/steps*(1+epsilon)
+            self.neuron_decay_rate2[li] = self.residuals_0[li+1].weights[neurons]/steps*(1+epsilon)
         for rli, neurons in self.decay_res.items():
-            self.neuron_res_decay_rate[rli] = self.residuals_1[rli].weights[neurons]/steps
+            self.neuron_res_decay_rate[rli] = self.residuals_1[rli].weights[neurons]/steps*(1+epsilon)
         pass
 
     def _decay_removable_neurons_(self):
         if self.neuron_decay_steps > 0:
             for li, neurons in self.decay.items():
                 self.layers[li+1].weights[neurons] -= self.neuron_decay_rate[li]
+                if np.abs(self.layers[li+1].weights[neurons]).sum() < np.abs(self.neuron_decay_rate[li]).sum():
+                    # print(self.neuron_decay_steps, "Weight smaller than decay rate")
+                    self.neuron_decay_rate[li] = self.layers[li+1].weights[neurons]
+
                 self.residuals_0[li+1].weights[neurons] -= self.neuron_decay_rate2[li]
+                if np.abs(self.residuals_0[li+1].weights[neurons]).sum() < np.abs(self.neuron_decay_rate2[li]).sum():
+                    # print(self.neuron_decay_steps, "Weight smaller than decay rate 2")
+                    self.neuron_decay_rate2[li] = self.residuals_0[li+1].weights[neurons]
+            
             for rli, neurons in self.decay_res.items():
                 self.residuals_1[rli].weights[neurons] -= self.neuron_res_decay_rate[rli]
+                if np.abs(self.residuals_1[rli].weights[neurons]).sum() < np.abs(self.neuron_res_decay_rate[rli]).sum():
+                    # print(self.neuron_decay_steps, "Weight smaller than decay rate res")
+                    self.neuron_res_decay_rate[rli] = self.residuals_1[rli].weights[neurons]
+            
             self.neuron_decay_steps -= 1
             
             if self.neuron_decay_steps == 0:
@@ -512,10 +631,15 @@ class DynamicNN_Relu:
             self.layers[li+1].del_weights[neurons] *= 0.
             self.residuals_0[li+1].del_weights[neurons] *= 0.
             self.layers[li].del_weights[:, neurons] *= 0.
+            self.layers[li].del_bias[neurons] *= 0.
+            self.residuals_1[li].del_weights[:, neurons] *= 0.
+            self.residuals_1[li].del_bias[neurons] *= 0.
+
                 
         for rli, neurons in self.decay_res.items():
             self.residuals_1[rli].del_weights[neurons] *= 0.
             self.residuals_0[rli].del_weights[:, neurons] *= 0.
+            self.residuals_0[rli].del_bias[neurons] *= 0.
                 
         pass
 
@@ -554,13 +678,28 @@ class DynamicNN_Relu:
             self.residuals_dim[rli] -= len(neurons)
         pass
 
-    def start_decaying_less_significant_neurons(self, decay_n, threshold=0.02, steps=1000):
+    def start_decaying_less_significant_neurons(self, decay_n, threshold=9e9, steps=1000):
         assert self.significance_res is not None
-
         self._identify_decayable_neurons_(decay_n, threshold)
+        if len(self.decay) + len(self.decay_res) < 1:
+            return
         self._set_neuron_decay_rate_(steps)
+        self.reset_optimizer()
 
     ############# Neuron Importance and Removal
+    ############# Reset Parameter Optimizers, after the parameters have been changed
+
+    def reset_optimizer(self):
+        for i in range(len(self.layers)):
+            self.layers[i].biasOpt = self.optimizer.set_parameter(self.layers[i].bias)
+            self.layers[i].weightsOpt = self.optimizer.set_parameter(self.layers[i].weights)
+
+            self.residuals_0[i].biasOpt = self.optimizer.set_parameter(self.residuals_0[i].bias)
+            self.residuals_0[i].weightsOpt = self.optimizer.set_parameter(self.residuals_0[i].weights)
+
+            self.residuals_1[i].biasOpt = self.optimizer.set_parameter(self.residuals_1[i].bias)
+            self.residuals_1[i].weightsOpt = self.optimizer.set_parameter(self.residuals_1[i].weights)
+        return
 
 
 
