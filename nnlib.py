@@ -58,24 +58,26 @@ class SigmoidCrossEntropyBinary(LossFunction):
 class SoftmaxCrossEntropy(LossFunction):
     @staticmethod
     def loss(output, target, epsilon=1e-11):
-        # exps = np.exp(output - np.max(output)) ## for stability
         # Prevent overflow
-        # output = np.clip(output, epsilon, 1 - epsilon)
-        output = output.clip(epsilon, 1 - epsilon)  # idea from internet
-        # exps = np.exp(output)
-        exps = np.e ** output
-        # probs = exps / np.sum(exps)  #####
-        probs = exps / exps.sum()
-        # return -((target * np.log(probs)).sum(axis=1)).mean()
+        # output = output.clip(epsilon, 1 - epsilon)  # idea from internet
+        # exps = np.e ** output
+        # probs = exps / exps.sum()
+        
+        exp = np.exp(x - np.max(x, axis=1, keepdims=True))
+        probs = exp / np.sum(exp, axis=1, keepdims=True) + epsilon
+
         return -((target * np.log(probs)).sum(axis=1)).mean()
 
     @staticmethod
     def del_loss(output, target, epsilon=1e-11):
-        # output = np.clip(output, epsilon, 1 - epsilon)
-        output = output.clip(epsilon, 1 - epsilon)
-        # divisor = np.maximum(output * (1 - output), epsilon)
-#         divisor = 1.
-        return (output - target)# / divisor
+        # output = output.clip(epsilon, 1 - epsilon)  # idea from internet
+        # exps = np.e ** output
+        # probs = exps / exps.sum()
+
+        exp = np.exp(x - np.max(x, axis=1, keepdims=True))
+        probs = exp / np.sum(exp, axis=1, keepdims=True)
+
+        return (output - target)
 
 
 class CrossEntropyLoss(LossFunction):

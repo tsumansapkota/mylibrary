@@ -16,11 +16,15 @@ filename = [
 
 class MNIST:
 
-    def download_mnist(self):
+    def download_mnist(self, dirs="data/MNIST/"):
         base_url = "http://yann.lecun.com/exdb/mnist/"
+        
+        lib_dir = os.path.dirname(os.path.realpath(__file__))# + dirs
+        dirs = os.path.join(lib_dir,dirs) + '/'
+        
         for name in filename:
             print("Downloading " + name[1] + "...")
-            request.urlretrieve(base_url + name[1], name[1])
+            request.urlretrieve(base_url + name[1], dirs+name[1])
         print("Download complete.")
 
     def save_mnist(self, dirs="data/MNIST"):

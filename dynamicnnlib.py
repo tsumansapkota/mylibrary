@@ -47,7 +47,7 @@ class Linear(tnn.Layer):
 
 class DynamicNN_Relu:
 
-    def __init__(self, layers_dim = [], optimizer=tnn.SGD(), ):
+    def __init__(self, layers_dim = [], residuals_dim = [], optimizer=tnn.SGD(), ):
         assert len(layers_dim) > 1
 
         self.layers_dim = layers_dim
@@ -59,7 +59,10 @@ class DynamicNN_Relu:
         self.residuals_0  = []
         self.residuals_1 = []
 
-        self.residuals_dim = []
+        self.residuals_dim = [1] * (len(layers_dim)-1)
+        if len(residuals_dim) > 0:
+            assert len(residuals_dim)+1 == len(layers_dim)
+            self.residuals_dim = residuals_dim        
 
         self.trainable_layers = []
         self.removable_layers = []
@@ -82,10 +85,10 @@ class DynamicNN_Relu:
                                     self.layers_dim[i+1],
                                     optimizer=self.optimizer)
             res0 = tnn.NonLinearLayer(self.layers_dim[i],
-                                      1,
+                                      self.residuals_dim[i],
                                       activation=Relu_1Linear(),
                                       optimizer=self.optimizer)
-            res1 = tnn.LinearLayer(1,
+            res1 = tnn.LinearLayer(self.residuals_dim[i],
                                    self.layers_dim[i+1],
                                    optimizer=self.optimizer)
             res1.weights *= 0.
@@ -96,7 +99,6 @@ class DynamicNN_Relu:
             self.relus.append(relu)
             self.residuals_0.append(res0)
             self.residuals_1.append(res1)
-            self.residuals_dim.append(1)
 
             self.trainable_layers.append(i)
 
